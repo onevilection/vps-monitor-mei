@@ -150,9 +150,9 @@ SSH経由で起動され、1秒ごとに1行のNDJSONをstdoutへ出力し続け
 ### 3.6 起動コマンド（クライアントが実行）
 ```
 # Go版（本命）
-/opt/vpswatcher/agent --iface=eth0 --id=vps-tokyo --interval=1
+/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1 --interval=1
 # PHP版（代替）
-php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-tokyo --interval=1
+php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-example-1 --interval=1
 ```
 
 ### 3.7 OS・環境依存マトリクス（重要）
@@ -177,7 +177,7 @@ php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-tokyo --interval=1
 1. **専用の低権限ユーザ** `metrics` を作成。`/proc` は基本world-readableなので **sudo不要**・root不要で全項目取得可能。
 2. **authorized_keys の forced-command**：監視用公開鍵を、エージェント起動のみに束縛する。万一鍵が漏れてもシェルは取れない。
    ```
-   command="/opt/vpswatcher/agent --iface=eth0 --id=vps-tokyo",no-pty,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA... metrics@watcher
+   command="/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1",no-pty,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA... metrics@watcher
    ```
 3. **公開ポートは増やさない**：エージェントはlistenしない。SSH 49222のみ。
 4. **クライアント側で known_hosts ピン留め**：MITM防止のためホスト鍵を固定検証（後述）。
@@ -381,8 +381,8 @@ ResizeMode="NoResize"
 ```json
 [
   {
-    "id": "vps-tokyo",
-    "label": "東京 (ViPass)",
+    "id": "vps-example-1",
+    "label": "例1 (ViPass)",
     "host": "203.0.113.10",
     "port": 49222,
     "user": "metrics",
@@ -392,7 +392,7 @@ ResizeMode="NoResize"
     "mounts": ["/", "/var/www"],
     "thresholds": { "cpu": [70,85,95], "mem": [75,88,95], "disk": [80,90,95], "swap": [25,50,80] }
   },
-  { "id": "vps-osaka", "label": "大阪 (EC)", "host": "...", "port": 49222, "...": "..." }
+  { "id": "vps-example-2", "label": "例2 (EC)", "host": "...", "port": 49222, "...": "..." }
 ]
 ```
 - `label`：パネル見出し用の表示名（任意。未指定なら`id`）。
@@ -404,7 +404,7 @@ ResizeMode="NoResize"
 {
   "alwaysOnTop": true,            // 最前面常駐のON/OFF（§5.2.1）
   "windowPosition": { "x": 1600, "y": 80 },
-  "order": ["vps-osaka", "vps-tokyo"],   // パネル表示順（ドラッグ結果を永続化）
+  "order": ["vps-example-2", "vps-example-1"],   // パネル表示順（ドラッグ結果を永続化）
   "masterVolume": 0.8
 }
 ```
