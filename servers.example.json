@@ -1,0 +1,26 @@
+[
+  {
+    "id": "vps-example-1",
+    "label": "Example Server 1",
+    "host": "203.0.113.10",
+    "port": 49222,
+    "user": "metrics",
+    "keyPath": "%USERPROFILE%\\.ssh\\watcher_ed25519",
+    "knownHostKey": "REPLACE_WITH_PINNED_HOST_KEY",
+    "iface": "eth0",
+    "mounts": ["/", "/var/www"],
+    "thresholds": { "cpu": [70, 85, 95], "mem": [75, 88, 95], "disk": [80, 90, 95], "swap": [25, 50, 80] }
+  },
+  {
+    "id": "vps-example-2",
+    "label": "Example Server 2",
+    "host": "203.0.113.20",
+    "port": 49222,
+    "user": "metrics",
+    "keyPath": "%USERPROFILE%\\.ssh\\watcher_ed25519",
+    "knownHostKey": "REPLACE_WITH_PINNED_HOST_KEY",
+    "iface": "eth0",
+    "mounts": ["/"],
+    "thresholds": { "cpu": [70, 85, 95], "mem": [75, 88, 95], "disk": [80, 90, 95], "swap": [25, 50, 80] }
+  }
+]
