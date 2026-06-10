@@ -1,0 +1,1 @@
+{"v":1,"id":"vps-example-1","ts":1717300000,"cpu_pct":12.4,"mem":{"used_pct":63.2,"used_mb":2521,"total_mb":3989},"swap":{"used_pct":0.0},"disk":[{"mount":"/","used_pct":48.1,"used_gb":24.0,"total_gb":50.0}],"net":{"iface":"eth0","rx_bps":102400,"tx_bps":51200},"load":[0.12,0.08,0.05],"uptime_sec":864000}
