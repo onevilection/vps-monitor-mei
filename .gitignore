@@ -1,0 +1,41 @@
+# ───────── 秘密・実設定（公開リポジトリのため最優先） ─────────
+# 実際のサーバ定義（実IP・user等）は置かない。テンプレートのみ追跡。
+servers.json
+state.json
+# 鍵・証明書・ホスト鍵（万一ルートに置かれても拾う保険）
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+known_hosts
+# .env方式は本プロジェクトでは未使用。使う場合のみ有効化:
+# .env
+# .env.*
+# !.env.example
+
+# ───────── Go（agent/）ビルド成果物 ─────────
+/agent/bin/
+/agent/dist/
+*.test
+*.out
+
+# ───────── .NET / WPF（client/）ビルド成果物 ─────────
+[Bb]in/
+[Oo]bj/
+*.user
+*.binlog
+/client/**/publish/
+.vs/
+
+# ───────── 配布同梱素材のうち再生成可能なもの（任意） ─────────
+# VOICEPEAKで再生成できる音声を成果物扱いにするなら除外を検討:
+# /assets/voice/*.wav
+
+# ───────── 作業メモ・一時ファイル（リポジトリに残さない） ─────────
+tmp/
+
+# ───────── OS / IDE ─────────
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
