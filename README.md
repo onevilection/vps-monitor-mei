@@ -29,11 +29,23 @@ N台の Ubuntu VPS の CPU / メモリ / ストレージ / ネットワークを
 
 GitHub Releases から取得し、SHA256 で改ざん検証してから配置する:
 
+自分のVPSのアーキテクチャを確認する（`uname -m` の結果が `x86_64` なら amd64、`aarch64` なら arm64）。以下は amd64 の例。arm64 の場合は `agent-linux-amd64` を `agent-linux-arm64` に読み替える（`.sha256` も同様）。
+
 ```sh
 curl -fsSL https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-amd64 \
   -o /opt/vpswatcher/agent
 # 同梱の SHA256 で検証
 sha256sum -c agent-linux-amd64.sha256
+chmod +x /opt/vpswatcher/agent
+```
+
+arm64（aarch64）の場合:
+
+```sh
+curl -fsSL https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-arm64 \
+  -o /opt/vpswatcher/agent
+# 同梱の SHA256 で検証
+sha256sum -c agent-linux-arm64.sha256
 chmod +x /opt/vpswatcher/agent
 ```
 
