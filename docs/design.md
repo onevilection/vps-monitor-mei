@@ -181,6 +181,7 @@ php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-example-1 --mounts=/,/var/w
    ```
    command="/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1 --mounts=/,/var/www",no-pty,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA... metrics@watcher
    ```
+   > 注: `--iface`/`--mounts` は省略可。省略時はデフォルトルートの NIC を自動判定し、ディスクは `/` を対象とする。README のセットアップ手順はこの省略形（`--id` のみ）を採用している。
 3. **公開ポートは増やさない**：エージェントはlistenしない。SSH 49222のみ。
 4. **クライアント側で known_hosts ピン留め**：MITM防止のためホスト鍵を固定検証（後述）。
 
