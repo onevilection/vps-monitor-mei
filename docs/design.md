@@ -150,10 +150,12 @@ SSH経由で起動され、1秒ごとに1行のNDJSONをstdoutへ出力し続け
 ### 3.6 起動コマンド（クライアントが実行）
 ```
 # Go版（本命）
-/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1 --interval=1
+/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1 --mounts=/,/var/www --interval=1
 # PHP版（代替）
-php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-example-1 --interval=1
+php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-example-1 --mounts=/,/var/www --interval=1
 ```
+
+--mounts：監視対象マウントをカンマ区切りで指定。未指定時の既定は / 単独。指定したマウントが disk[] の対象になる（§9.1 の mounts と対応、§2.3スキーマ）。--interval の既定は1秒。
 
 ### 3.7 OS・環境依存マトリクス（重要）
 
@@ -177,7 +179,7 @@ php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-example-1 --interval=1
 1. **専用の低権限ユーザ** `metrics` を作成。`/proc` は基本world-readableなので **sudo不要**・root不要で全項目取得可能。
 2. **authorized_keys の forced-command**：監視用公開鍵を、エージェント起動のみに束縛する。万一鍵が漏れてもシェルは取れない。
    ```
-   command="/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1",no-pty,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA... metrics@watcher
+   command="/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1 --mounts=/,/var/www",no-pty,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA... metrics@watcher
    ```
 3. **公開ポートは増やさない**：エージェントはlistenしない。SSH 49222のみ。
 4. **クライアント側で known_hosts ピン留め**：MITM防止のためホスト鍵を固定検証（後述）。
