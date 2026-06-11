@@ -29,25 +29,22 @@ N台の Ubuntu VPS の CPU / メモリ / ストレージ / ネットワークを
 
 GitHub Releases から取得し、SHA256 で改ざん検証してから配置する:
 
-自分のVPSのアーキテクチャを確認する（`uname -m` の結果が `x86_64` なら amd64、`aarch64` なら arm64）。以下は amd64 の例。arm64 の場合は `agent-linux-amd64` を `agent-linux-arm64` に読み替える（`.sha256` も同様）。
+まず自分の VPS のアーキテクチャを確認する（`uname -m` の結果が `x86_64` なら amd64、`aarch64` なら arm64）。以下は **amd64** の例。arm64 の場合は `agent-linux-amd64` を `agent-linux-arm64` に読み替える（`.sha256` も同様）。
 
 ```sh
-curl -fsSL https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-amd64 \
-  -o /opt/vpswatcher/agent
-# 同梱の SHA256 で検証
+cd /tmp
+# バイナリと SHA256 を「元のファイル名のまま」両方ダウンロード
+curl -fsSLO https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-amd64
+curl -fsSLO https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-amd64.sha256
+
+# 改ざん検証（.sha256 内のファイル名と一致するので検証が通る）
 sha256sum -c agent-linux-amd64.sha256
-chmod +x /opt/vpswatcher/agent
+
+# 検証が OK になってから配置（実行権限付与も同時）
+sudo install -m 755 agent-linux-amd64 /opt/vpswatcher/agent
 ```
 
-arm64（aarch64）の場合:
-
-```sh
-curl -fsSL https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-arm64 \
-  -o /opt/vpswatcher/agent
-# 同梱の SHA256 で検証
-sha256sum -c agent-linux-arm64.sha256
-chmod +x /opt/vpswatcher/agent
-```
+arm64（aarch64）の場合は、上記の `agent-linux-amd64` を `agent-linux-arm64` に読み替えて同じ手順を実行する。
 
 - エージェントは **listen しない**。到達経路は SSH のみ。
 - 監視用公開鍵は `authorized_keys` の **forced-command** でエージェント起動のみに束縛する（鍵が漏れてもシェルを取らせない）。詳細は設計書 §4。
