@@ -32,6 +32,9 @@ GitHub Releases から取得し、SHA256 で改ざん検証してから配置す
 まず自分の VPS のアーキテクチャを確認する（`uname -m` の結果が `x86_64` なら amd64、`aarch64` なら arm64）。以下は **amd64** の例。arm64 の場合は `agent-linux-amd64` を `agent-linux-arm64` に読み替える（`.sha256` も同様）。
 
 ```sh
+# 配置先ディレクトリを用意
+sudo mkdir -p /opt/vpswatcher
+
 cd /tmp
 # バイナリと SHA256 を「元のファイル名のまま」両方ダウンロード
 curl -fsSLO https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-amd64
@@ -46,15 +49,67 @@ sudo install -m 755 agent-linux-amd64 /opt/vpswatcher/agent
 
 arm64（aarch64）の場合は、上記の `agent-linux-amd64` を `agent-linux-arm64` に読み替えて同じ手順を実行する。
 
-- エージェントは **listen しない**。到達経路は SSH のみ。
-- 監視用公開鍵は `authorized_keys` の **forced-command** でエージェント起動のみに束縛する（鍵が漏れてもシェルを取らせない）。詳細は設計書 §4。
+#### 起動モデル（重要）
+
+エージェントは**常駐サービスではない**。`cron` も `systemd` ユニットも不要で、自分でデーモン化もしない。
+
+- クライアントが **SSH で接続したときだけ起動**し、1Hz で NDJSON を stdout へ流す。
+- **SSH 切断（セッション終了）で自動的に終了**する。プロセスを残さない。
+- **listen しない**：開くポートは増えない。到達経路は既存の SSH のみ。
+
+#### 監視専用ユーザと鍵の設定
+
+監視専用の低権限ユーザを作り、その `authorized_keys` に **forced-command** で監視鍵を束縛する（鍵が漏れてもシェルを取らせない）。`/proc`・`statfs` は world-readable なので **sudo 不要・root 不要**で全項目を取得できる。
+
+```sh
+# 監視専用ユーザ（ログインシェルなし）を作成
+sudo useradd --create-home --shell /usr/sbin/nologin metrics
+```
+
+クライアント側で用意した監視用**公開鍵**（次節「Windows クライアント」で生成）を、`metrics` ユーザの `~/.ssh/authorized_keys` に forced-command 付きで 1 行で登録する:
+
+```
+command="/opt/vpswatcher/agent --id=vps-example-1",no-pty,no-port-forwarding,no-X11-forwarding,no-user-rc ssh-ed25519 AAAA... watcher-client
+```
+
+- `--iface`/`--mounts` は**省略可**。省略時はデフォルトルートの NIC を自動判定し、ディスクは `/` を対象とする。複数マウントや IF 固定が必要なときだけ明示する。
+- forced-command の各オプションの意味・フラグ詳細・セキュリティ設計は設計書 [§3.6](docs/design.md) / [§4](docs/design.md) を参照。
 
 ### Windows クライアント（WPF）
+
+#### 監視用 SSH 鍵の準備
+
+監視専用の SSH 鍵ペアを作る（無人で自動接続するためパスフレーズ無し）。PowerShell で:
+
+```powershell
+ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\watcher_ed25519" -N '""' -C "watcher-client"
+```
+
+生成された**公開鍵** `watcher_ed25519.pub` の中身を、各 VPS の `metrics` ユーザの forced-command 付き `authorized_keys` に登録する（前節「監視専用ユーザと鍵の設定」）。**秘密鍵** `watcher_ed25519` はクライアント端末から持ち出さない。
+
+> ⚠️ **パスフレーズ無し鍵のリスク**: パスフレーズを付けていないため、秘密鍵ファイルが漏れると監視接続を再現される。forced-command で「エージェント起動のみ」に束縛しているのでシェルや任意コマンドは取られないが、秘密鍵ファイル自体の保護（`$env:USERPROFILE\.ssh` のアクセス権・端末の管理）は利用者の責任。より厳密にするならパスフレーズ＋ssh-agent を検討する。
+
+#### 接続確認（agent の起動テスト）
+
+アプリ導入前に、SSH で agent が起動することを手動確認する。PowerShell で（`<host>` は VPS のホスト名/IP、`<port>` は SSH ポート）:
+
+```powershell
+ssh -i "$env:USERPROFILE\.ssh\watcher_ed25519" -p <port> metrics@<host>
+```
+
+- `<port>` は各自の SSH ポートに置き換える（**デフォルトは 22**。変更している場合はその番号）。
+- 初回接続時は**ホスト鍵の確認**を求められる。表示されたフィンガープリントが正しいことを確認してから受け入れる（このホスト鍵はクライアントが後でピン留め検証に使う。設計書 §4）。
+- 成功すると NDJSON が 1 行/秒で流れ出す。**1 行目はレート系（`cpu_pct`/`rx_bps`/`tx_bps`）が `null`（測定中）**、2 行目以降が実値になる。`Ctrl+C` で停止する。
+
+#### クライアントアプリ（WPF）の導入
+
+> （WPF クライアント実装後に提供予定。以下は予定手順）
 
 GitHub Releases から self-contained 単一 exe をダウンロードして実行する。
 
 - ⚠️ **SmartScreen 警告**: 署名なし exe のため初回起動時に保護警告が出る。自分用／少人数なら「詳細情報 → 実行」で続行可。
 - ⚠️ **サイズ**: .NET ランタイム同梱のため 100MB 超になる（ゼロインストールとのトレードオフ）。
+- 監視対象は `%APPDATA%\VpsWatcher\servers.json` に定義する（テンプレートは [`servers.example.json`](servers.example.json)）。`host`/`port`/`user`(=`metrics`)/`keyPath`(=`watcher_ed25519`)/`knownHostKey`(ピン留めするホスト鍵)/`iface`/`mounts`/`thresholds` を設定する。詳細は下の「設定」節と設計書 §9.1。
 
 ---
 
