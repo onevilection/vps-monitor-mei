@@ -66,11 +66,25 @@ arm64（aarch64）の場合は、上記の `agent-linux-amd64` を `agent-linux-
 sudo useradd --create-home --shell /usr/sbin/nologin metrics
 ```
 
-クライアント側で用意した監視用**公開鍵**（次節「Windows クライアント」で生成）を、`metrics` ユーザの `~/.ssh/authorized_keys` に forced-command 付きで 1 行で登録する:
+クライアント側で用意した監視用**公開鍵**（次節「Windows クライアント」で生成）を、`metrics` ユーザの `~/.ssh/authorized_keys` に forced-command 付きで 1 行で登録する。
 
+```sh
+# metrics ユーザの .ssh を用意（初回のみ・権限が重要）
+sudo mkdir -p /home/metrics/.ssh
+sudo chmod 700 /home/metrics/.ssh
+
+# forced-command 付きで公開鍵を 1 行追記する
+# ↓ 「ssh-ed25519 AAAA... watcher-client」の部分を、watcher_ed25519.pub の中身そのものに置き換える
+echo 'command="/opt/vpswatcher/agent --id=vps-example-1",no-pty,no-port-forwarding,no-X11-forwarding,no-user-rc ssh-ed25519 AAAA... watcher-client' \
+  | sudo tee -a /home/metrics/.ssh/authorized_keys
+
+# 権限と所有者を SSH の要求どおりに整える
+sudo chmod 600 /home/metrics/.ssh/authorized_keys
+sudo chown -R metrics:metrics /home/metrics/.ssh
 ```
-command="/opt/vpswatcher/agent --id=vps-example-1",no-pty,no-port-forwarding,no-X11-forwarding,no-user-rc ssh-ed25519 AAAA... watcher-client
-```
+
+> ⚠️ `sudo echo '...' >> ファイル` は使わない。`sudo` はリダイレクト（`>>`）に効かず、`metrics` 所有のファイルへの書き込みが Permission denied になる。上記のように `sudo tee -a` を使う。
+> ⚠️ SSH は `~/.ssh`=700・`authorized_keys`=600・所有者=`metrics` でないと鍵を拒否する。上記の `chmod`/`chown` は必須。
 
 - `--iface`/`--mounts` は**省略可**。省略時はデフォルトルートの NIC を自動判定し、ディスクは `/` を対象とする。複数マウントや IF 固定が必要なときだけ明示する。
 - forced-command の各オプションの意味・フラグ詳細・セキュリティ設計は設計書 [§3.6](docs/design.md) / [§4](docs/design.md) を参照。
