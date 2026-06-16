@@ -155,7 +155,7 @@ SSH経由で起動され、1秒ごとに1行のNDJSONをstdoutへ出力し続け
 php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-example-1 --mounts=/,/var/www --interval=1
 ```
 
---mounts：監視対象マウントをカンマ区切りで指定。未指定時の既定は / 単独。指定したマウントが disk[] の対象になる（§9.1 の mounts と対応、§2.3スキーマ）。--interval の既定は1秒。
+--mounts：監視対象マウントをカンマ区切りで指定。未指定時の既定は / 単独。指定したマウントが disk[] の対象になる（§9.1 の mounts と対応。disk 配列のスキーマは `docs/ndjson-schema.md` の §2.3 を参照）。--interval の既定は1秒。
 
 ### 3.7 OS・環境依存マトリクス（重要）
 
@@ -176,10 +176,10 @@ php /opt/vpswatcher/stream.php --iface=eth0 --id=vps-example-1 --mounts=/,/var/w
 
 しんさんの既存ハードニング（SSH 49222・`PermitRootLogin no`・fail2ban・鍵認証）を前提に、さらに以下を重ねる。
 
-1. **専用の低権限ユーザ** `metrics` を作成。`/proc` は基本world-readableなので **sudo不要**・root不要で全項目取得可能。
+1. **専用の低権限ユーザ** `metrics` を作成。`/proc` は基本world-readableなので **sudo不要**・root不要で全項目取得可能。**ログインシェルは `/bin/bash`**（forced-command はログインシェル経由で実行されるため `nologin` 不可）。
 2. **authorized_keys の forced-command**：監視用公開鍵を、エージェント起動のみに束縛する。万一鍵が漏れてもシェルは取れない。
    ```
-   command="/opt/vpswatcher/agent --iface=eth0 --id=vps-example-1 --mounts=/,/var/www",no-pty,no-port-forwarding,no-X11-forwarding ssh-ed25519 AAAA... metrics@watcher
+   command="/opt/vpswatcher/agent --id=vps-example-1",no-pty,no-port-forwarding,no-X11-forwarding,no-user-rc ssh-ed25519 AAAA... watcher-client
    ```
    > 注: `--iface`/`--mounts` は省略可。省略時はデフォルトルートの NIC を自動判定し、ディスクは `/` を対象とする。README のセットアップ手順はこの省略形（`--id` のみ）を採用している。
 3. **公開ポートは増やさない**：エージェントはlistenしない。SSH 49222のみ。
@@ -424,9 +424,20 @@ ResizeMode="NoResize"
 - `CGO_ENABLED=0` で完全静的ビルド → glibc非依存でどのUbuntuでも動く。
 - `GOOS=linux GOARCH=amd64` と `arm64` の2種をRelease添付。
 - VPS側はワンライナーで導入：
-  ```
-  curl -fsSL https://github.com/<user>/<repo>/releases/latest/download/agent-linux-amd64 \
-    -o /opt/vpswatcher/agent && chmod +x /opt/vpswatcher/agent
+  ```sh
+  # 配置先ディレクトリを用意
+  sudo mkdir -p /opt/vpswatcher
+
+  cd /tmp
+  # バイナリと SHA256 を「元のファイル名のまま」両方ダウンロード（amd64 の例）
+  curl -fsSLO https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-amd64
+  curl -fsSLO https://github.com/onevilection/vps-monitor-mei/releases/latest/download/agent-linux-amd64.sha256
+
+  # 改ざん検証（.sha256 内のファイル名と一致するので検証が通る）
+  sha256sum -c agent-linux-amd64.sha256
+
+  # 検証 OK 後に配置（実行権限も同時付与）
+  sudo install -m 755 agent-linux-amd64 /opt/vpswatcher/agent
   ```
 - arch自動判定する `install.sh` を1本添えるとさらに親切。
 - **SHA256チェックサムを同梱**し、導入後に検証（改ざん検知。しんさんのセキュリティ志向に合わせる）。

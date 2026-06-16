@@ -62,9 +62,11 @@ arm64（aarch64）の場合は、上記の `agent-linux-amd64` を `agent-linux-
 監視専用の低権限ユーザを作り、その `authorized_keys` に **forced-command** で監視鍵を束縛する（鍵が漏れてもシェルを取らせない）。`/proc`・`statfs` は world-readable なので **sudo 不要・root 不要**で全項目を取得できる。
 
 ```sh
-# 監視専用ユーザ（ログインシェルなし）を作成
-sudo useradd --create-home --shell /usr/sbin/nologin metrics
+# 監視専用ユーザを作成（forced-command 実行のためログインシェルは bash）
+sudo useradd --create-home --shell /bin/bash metrics
 ```
+
+> ⚠️ シェルは `/bin/bash`（`/usr/sbin/nologin` にしないこと）。forced-command はログインシェルを経由して実行されるため、nologin だとシェルが先に接続を蹴り、agent まで到達せず `This account is currently not available.` で失敗する。対話シェルや任意コマンドの実行は forced-command の `no-pty` 等が封じるので、シェルが bash でも安全性は保たれる。
 
 クライアント側で用意した監視用**公開鍵**（次節「Windows クライアント」で生成）を、`metrics` ユーザの `~/.ssh/authorized_keys` に forced-command 付きで 1 行で登録する。
 
