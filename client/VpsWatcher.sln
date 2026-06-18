@@ -9,6 +9,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VpsWatcher.ConsoleTest", "V
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VpsWatcher.Core.Tests", "VpsWatcher.Core.Tests\VpsWatcher.Core.Tests.csproj", "{A4C738CE-7E8B-4D0D-AC89-91D6A70E73FC}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VpsWatcher.App", "VpsWatcher.App\VpsWatcher.App.csproj", "{0B5B5263-4780-4B59-BEF6-90CFA5BF4D89}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "VpsWatcher.App.Tests", "VpsWatcher.App.Tests\VpsWatcher.App.Tests.csproj", "{CC11FA13-1B5F-4A26-8606-9C54C9D1387F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +34,13 @@ Global
 		{A4C738CE-7E8B-4D0D-AC89-91D6A70E73FC}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A4C738CE-7E8B-4D0D-AC89-91D6A70E73FC}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A4C738CE-7E8B-4D0D-AC89-91D6A70E73FC}.Release|Any CPU.Build.0 = Release|Any CPU
+		{0B5B5263-4780-4B59-BEF6-90CFA5BF4D89}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0B5B5263-4780-4B59-BEF6-90CFA5BF4D89}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0B5B5263-4780-4B59-BEF6-90CFA5BF4D89}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0B5B5263-4780-4B59-BEF6-90CFA5BF4D89}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CC11FA13-1B5F-4A26-8606-9C54C9D1387F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CC11FA13-1B5F-4A26-8606-9C54C9D1387F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CC11FA13-1B5F-4A26-8606-9C54C9D1387F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CC11FA13-1B5F-4A26-8606-9C54C9D1387F}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
