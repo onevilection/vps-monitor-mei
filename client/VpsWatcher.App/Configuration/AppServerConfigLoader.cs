@@ -53,8 +53,22 @@ public static class AppServerConfigLoader
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "VpsWatcher", "servers.json");
 
+        return LoadFromServersJson(path, out error);
+    }
+
+    /// <summary>
+    /// Loads the first server from a servers.json at <paramref name="path"/>. Internal seam so the
+    /// parse-error branch is unit-testable against a temp file — the public <see cref="Load"/> always
+    /// uses the user-local %APPDATA% path, which tests must never read or overwrite.
+    /// </summary>
+    internal static ServerConfig? LoadFromServersJson(string path, out string? error)
+    {
+        error = null;
+
         if (!File.Exists(path))
         {
+            // Not-yet-configured: the path here is a location hint (where to create the file), not
+            // file contents, so showing it is intentional and helpful.
             error =
                 "接続先が未設定です。環境変数 VPSWATCH_HOST/PORT/USER/KEYPATH/KNOWNHOSTKEY を設定するか、" +
                 $"{path} に servers.json（servers.example.json 参照）を置いてください。";
@@ -76,7 +90,13 @@ public static class AppServerConfigLoader
         }
         catch (JsonException ex)
         {
-            error = $"servers.json の解析に失敗しました: {ex.Message}";
+            // servers.json holds host/key/fingerprint; JsonException.Message can echo offending
+            // fragments, and the file's full path embeds the OS username. StatusMessage is painted
+            // on the transparent gadget (screenshot/screen-share surface), so keep BOTH the raw
+            // parser message and the path off-screen — show only a fixed message and send the detail
+            // (message + path) to Trace (off-screen, no persistent log). Same discipline as MEDIUM 1.
+            System.Diagnostics.Trace.TraceError($"failed to parse servers.json at '{path}': {ex}");
+            error = "servers.json の解析に失敗しました。詳細はデバッグ出力を参照してください。";
             return null;
         }
     }

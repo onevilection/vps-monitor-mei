@@ -62,7 +62,16 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _service = null;
             _vm = null;
             Servers.Clear();
-            StatusMessage = $"接続の初期化に失敗しました: {ex.Message}";
+
+            // Never surface the raw exception text on screen. SSH.NET's PrivateKeyFile / connect
+            // exceptions can embed the private-key path, and StatusMessage is painted on the
+            // transparent gadget (so it leaks into screenshots / screen-shares). Show only a fixed
+            // message plus the server id — the same Detail discipline SshConnectionService keeps
+            // (§5.4.1 / secrets). Send the full detail to Trace, which has no on-screen surface and
+            // writes no persistent log file.
+            System.Diagnostics.Trace.TraceError(
+                $"connection init failed for server '{config.Id}': {ex}");
+            StatusMessage = $"接続の初期化に失敗しました（{config.Id}）。詳細はデバッグ出力を参照してください。";
         }
     }
 
