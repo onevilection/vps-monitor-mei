@@ -1,0 +1,21 @@
+# デフォルト：テキストは自動判定し、リポジトリ内ではLFに正規化
+* text=auto eol=lf
+
+# 明示的にテキスト扱い（改行正規化の対象）
+*.cs      text
+*.xaml    text
+*.go      text
+*.md      text
+*.json    text
+*.yml     text
+*.yaml    text
+*.sh      text eol=lf
+*.ps1     text eol=crlf
+
+# バイナリ（改行変換しない）
+*.png     binary
+*.jpg     binary
+*.ico     binary
+*.wav     binary
+*.dll     binary
+*.exe     binary
