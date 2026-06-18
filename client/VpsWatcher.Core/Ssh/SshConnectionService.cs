@@ -56,7 +56,10 @@ public sealed class SshConnectionService : IDisposable
 
         // Our own credential (empty passphrase). This is NOT the server host key and plays no
         // part in host-key verification; it is loaded once and reused across reconnects.
-        _privateKey = new PrivateKeyFile(_config.KeyPath);
+        // Expand environment variables so keyPath values written the design §9.1 / README way
+        // (e.g. "%USERPROFILE%\.ssh\watcher_ed25519") resolve to a real path before SSH.NET
+        // opens the file — otherwise the documented example never loads.
+        _privateKey = new PrivateKeyFile(Environment.ExpandEnvironmentVariables(_config.KeyPath));
     }
 
     public void Start()
