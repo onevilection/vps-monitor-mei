@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>VpsWatcher.App</RootNamespace>
+    <AssemblyName>VpsWatcher.App</AssemblyName>
+    <!-- Phase 3a: normal window. Transparency/Topmost/DragMove come in Phase 3b. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VpsWatcher.Core\VpsWatcher.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+</Project>
