@@ -29,6 +29,13 @@ public sealed class SshConnectionService : IDisposable
     private static readonly TimeSpan BackoffBase = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan BackoffCap = TimeSpan.FromSeconds(30);
 
+    // SSH-level keep-alive (§5.4): actively probe the peer so a half-open connection (socket alive,
+    // no data, no FIN/RST — e.g. NAT idle-drop or sleep/resume) is surfaced as an error instead of
+    // hanging silently. Half the silence window so a dead peer is normally detected before the
+    // wall-clock watchdog has to abort. One tiny packet every few seconds only when otherwise idle —
+    // negligible against the 1 Hz NDJSON stream, so it does not violate the low-load budget (§13.2).
+    private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(5);
+
     private readonly ServerConfig _config;
     private readonly HostKeyVerifier _verifier;
     private readonly string _keyPath;
@@ -118,6 +125,10 @@ public sealed class SshConnectionService : IDisposable
                 // previous verification result can be reused.
                 using var client = new SshClient(connInfo);
 
+                // Actively detect dead peers (half-open connections) rather than hang on a silent
+                // socket forever (§5.4) — see KeepAliveInterval.
+                client.KeepAliveInterval = KeepAliveInterval;
+
                 client.HostKeyReceived += (_, e) =>
                 {
                     // SSH.NET defaults CanTrust = true, so deny first and grant only on a verified
@@ -179,28 +190,82 @@ public sealed class SshConnectionService : IDisposable
     {
         // Forced-command: the server ignores this (empty) command string and runs the agent,
         // which streams NDJSON to stdout — same as `ssh metrics@host` on a raw terminal (§5.4.1).
-        using var cmd = client.CreateCommand(string.Empty);
-        cmd.BeginExecute();
-        using var reader = new StreamReader(cmd.OutputStream);
+        var cmd = client.CreateCommand(string.Empty);
+        var reader = new StreamReader(cmd.OutputStream);
+        try
+        {
+            cmd.BeginExecute();
 
+            // The abort the silence watchdog uses: disposing the client tears down the channel/socket,
+            // which makes a parked synchronous PipeStream.Read return/throw so its thread-pool thread
+            // unwinds instead of leaking. After this the loop throws TimeoutException → Disconnected.
+            await PumpLinesAsync(reader, abort: client.Dispose, SilenceTimeout, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            // On the silence-timeout path abort() has already disposed the whole client, so the
+            // command's channel may be torn down by the time we unwind here. SSH.NET's double-Dispose
+            // behaviour is version-dependent, so dispose defensively: a throw while unwinding must
+            // never mask the TimeoutException that drives Disconnected → reconnect — otherwise the
+            // freeze this fix targets would silently return.
+            SafeDispose(reader);
+            SafeDispose(cmd);
+        }
+    }
+
+    private static void SafeDispose(IDisposable disposable)
+    {
+        try { disposable.Dispose(); }
+        catch { /* already torn down by abort(); never let teardown mask the connection outcome. */ }
+    }
+
+    /// <summary>
+    /// Reads NDJSON lines from <paramref name="reader"/>, raising <see cref="MetricsReceived"/> per
+    /// parsed sample, until EOF, cancellation, or <paramref name="silenceTimeout"/> of silence.
+    ///
+    /// The silence window (§5.4) is enforced with a REAL wall-clock timer raced against the read —
+    /// NOT by cancelling the read. SSH.NET's <c>PipeStream.Read</c> is a blocking synchronous read
+    /// reached via the base <c>Stream.ReadAsync</c> fallback, so <c>ReadLineAsync(token)</c> does not
+    /// observe the token once a read is in flight; a silent-but-open channel would otherwise park it
+    /// forever (the 4-hour freeze). On timeout we invoke <paramref name="abort"/> (dispose the client)
+    /// to unwind that parked read, then throw <see cref="TimeoutException"/> so the caller reconnects.
+    ///
+    /// Internal seam (not for direct use): exposed so the watchdog can be tested against a read that
+    /// never completes and ignores its token, with no real socket.
+    /// </summary>
+    internal async Task PumpLinesAsync(
+        TextReader reader, Action abort, TimeSpan silenceTimeout, CancellationToken ct)
+    {
         while (!ct.IsCancellationRequested)
         {
-            // Wall-clock silence watchdog (§5.4): cancel the read if no line arrives within the
-            // window. Uses a timer (CancelAfter), never the sample `ts`.
-            using var silenceCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            silenceCts.CancelAfter(SilenceTimeout);
+            var readTask = reader.ReadLineAsync(ct).AsTask();
 
-            string? line;
-            try
+            using var timerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            var timerTask = Task.Delay(silenceTimeout, timerCts.Token);
+
+            var winner = await Task.WhenAny(readTask, timerTask).ConfigureAwait(false);
+
+            if (winner != readTask)
             {
-                line = await reader.ReadLineAsync(silenceCts.Token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-            {
+                // The timer (or ct) won — the read is still parked. Observe it so its eventual
+                // failure (once aborted/torn down) is not an unobserved task exception.
+                ObserveFault(readTask);
+
+                if (ct.IsCancellationRequested)
+                    break; // stop requested, not a silence timeout
+
+                // Real silence: unwind the parked read by tearing down the connection, then report
+                // the timeout so RunAsync transitions to Disconnected and reconnects (§5.4).
+                abort();
                 throw new TimeoutException(
-                    $"no data for {SilenceTimeout.TotalSeconds:0}s (wall-clock watchdog).");
+                    $"no data for {silenceTimeout.TotalSeconds:0}s (wall-clock watchdog).");
             }
 
+            // Read won: stop the timer (and observe its cancellation) before consuming the line.
+            timerCts.Cancel();
+            ObserveFault(timerTask);
+
+            var line = await readTask.ConfigureAwait(false); // already completed; surfaces real errors
             if (line is null)
                 return; // EOF
 
@@ -214,6 +279,15 @@ public sealed class SshConnectionService : IDisposable
 
         ct.ThrowIfCancellationRequested();
     }
+
+    /// <summary>Drains a task's eventual fault/cancellation so an abandoned read/timer can't become
+    /// an unobserved task exception. Fire-and-forget; we never need the result.</summary>
+    private static void ObserveFault(Task task)
+        => task.ContinueWith(
+            static t => { _ = t.Exception; },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
 
     private static TimeSpan Backoff(int attempt)
     {

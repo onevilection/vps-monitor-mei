@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using VpsWatcher.Core.Configuration;
 using VpsWatcher.Core.Ssh;
 
@@ -86,5 +88,63 @@ public class SshConnectionServiceTests
         {
             Directory.Delete(dir, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task Silent_stream_times_out_via_wall_clock_even_when_the_read_ignores_cancellation()
+    {
+        // Reproduces the 4-hour freeze root cause and its fix. SSH.NET's PipeStream.Read is a blocking
+        // synchronous read reached via the base Stream.ReadAsync fallback, so ReadLineAsync(token)
+        // never honours the token — a silent-but-open channel parks it forever.
+        var reader = new NeverCompletingReader();
+
+        // (a) THE TRAP: cancelling the token does NOT complete a PipeStream-style read. This is exactly
+        // why the old `ReadLineAsync(silenceCts.Token)` + CancelAfter watchdog could never fire.
+        using (var probe = new CancellationTokenSource())
+        {
+            probe.CancelAfter(TimeSpan.FromMilliseconds(150));
+            var read = reader.ReadLineAsync(probe.Token).AsTask();
+            var raced = await Task.WhenAny(read, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.NotSame(read, raced);   // still pending well after cancellation — the watchdog is blind
+            Assert.False(read.IsCompleted);
+        }
+
+        // (b) THE FIX: PumpLinesAsync enforces the silence window with a real wall-clock timer raced
+        // against the read, and on timeout it ABORTS the connection (to unwind the parked read) and
+        // throws TimeoutException — which RunAsync maps to Disconnected → reconnect. No infinite wait.
+        var dir = Path.Combine(Path.GetTempPath(), "vpswatcher_key_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var keyPath = Path.Combine(dir, "id_ed25519");
+        File.WriteAllText(keyPath, "not a real key"); // ctor only stats the path (MEDIUM 3)
+        try
+        {
+            using var svc = new SshConnectionService(ConfigWithKeyPath(keyPath));
+            int aborts = 0;
+            var silence = TimeSpan.FromMilliseconds(300);
+            using var ct = new CancellationTokenSource(TimeSpan.FromSeconds(10)); // safety net only
+
+            var ex = await Assert.ThrowsAsync<TimeoutException>(() =>
+                svc.PumpLinesAsync(reader, abort: () => Interlocked.Increment(ref aborts), silence, ct.Token));
+
+            Assert.Equal(1, aborts);                    // tore down the connection to unwind the parked read
+            Assert.False(ct.IsCancellationRequested);   // fired on the 300ms timer, far under the 10s net
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A reader whose async read never completes and ignores its <see cref="CancellationToken"/> —
+    /// the in-test stand-in for SSH.NET's <c>PipeStream</c>, whose synchronous blocking Read (reached
+    /// via the base <c>Stream.ReadAsync</c> fallback) cannot be cancelled mid-read.
+    /// </summary>
+    private sealed class NeverCompletingReader : TextReader
+    {
+        private readonly TaskCompletionSource<string?> _never = new();
+        public override ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken)
+            => new(_never.Task);
+        public override Task<string?> ReadLineAsync() => _never.Task;
     }
 }
