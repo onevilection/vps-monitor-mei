@@ -27,9 +27,9 @@ public partial class App : Application
         _state = AppStateStore.Load(_statePath);
 
         var dispatcher = new WpfUiDispatcher(Dispatcher);
-        var config = AppServerConfigLoader.Load(e.Args, out var configError);
+        var configs = AppServerConfigLoader.Load(e.Args, out var configError);
 
-        _mainViewModel = new MainViewModel(config, configError, dispatcher)
+        _mainViewModel = new MainViewModel(configs, configError, dispatcher)
         {
             AlwaysOnTop = _state.AlwaysOnTop, // restore (§5.2.1)
         };

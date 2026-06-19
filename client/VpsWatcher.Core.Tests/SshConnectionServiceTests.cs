@@ -60,4 +60,31 @@ public class SshConnectionServiceTests
             Environment.SetEnvironmentVariable(varName, null);
         }
     }
+
+    [Fact]
+    public void Ctor_only_checks_the_key_path_exists_and_does_not_parse_it()
+    {
+        // MEDIUM 3: the PrivateKeyFile is created per-connection inside the reconnect loop (same scope
+        // as its SshClient), never built once in the ctor and shared across reconnects — so there is
+        // no Dispose/handshake race. As a code-level guarantee, the ctor must NOT parse the key: a
+        // file that EXISTS but is not a valid key therefore constructs cleanly (it would only fail
+        // later, per-connection). A genuinely missing path still fails fast (asserted above).
+        var dir = Path.Combine(Path.GetTempPath(), "vpswatcher_key_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        var path = Path.Combine(dir, "id_ed25519");
+        File.WriteAllText(path, "not a real private key");
+        try
+        {
+            var ex = Record.Exception(() =>
+            {
+                using var service = new SshConnectionService(ConfigWithKeyPath(path));
+            });
+
+            Assert.Null(ex); // ctor succeeded: the key was not parsed/held — no shared PrivateKeyFile
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
 }

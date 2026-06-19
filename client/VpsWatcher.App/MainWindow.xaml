@@ -124,11 +124,16 @@
             <!-- Empty state (no server / config missing). Null when a server exists. -->
             <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#FF8A80" />
 
-            <!-- Single server panel (Phase 3a content, unchanged logic; dark-theme colors). -->
-            <ContentControl Content="{Binding Server}"
-                            Visibility="{Binding HasServer, Converter={StaticResource BoolToVis}}">
-                <ContentControl.ContentTemplate>
+            <!-- N server panels stacked vertically (design §5.3). Each item reuses the single-server
+                 panel (Phase 3a/3b content, unchanged logic) inside a separator Border. SizeToContent
+                 lets the window grow taller as servers are added. Reorder grip / character / audio
+                 are later phases. -->
+            <ItemsControl ItemsSource="{Binding Servers}"
+                          Visibility="{Binding HasServer, Converter={StaticResource BoolToVis}}">
+                <ItemsControl.ItemTemplate>
                     <DataTemplate DataType="{x:Type vm:ServerViewModel}">
+                      <Border Margin="0,2,0,8" Padding="0,0,0,8"
+                              BorderBrush="#22FFFFFF" BorderThickness="0,0,0,1">
                         <StackPanel>
 
                             <TextBlock Text="{Binding Label}" FontSize="18" FontWeight="Bold" Foreground="#F5F7FA" />
@@ -266,9 +271,10 @@
                             </Grid>
 
                         </StackPanel>
+                      </Border>
                     </DataTemplate>
-                </ContentControl.ContentTemplate>
-            </ContentControl>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
         </StackPanel>
     </Border>
 </Window>

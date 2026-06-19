@@ -31,7 +31,7 @@ public sealed class SshConnectionService : IDisposable
 
     private readonly ServerConfig _config;
     private readonly HostKeyVerifier _verifier;
-    private readonly PrivateKeyFile _privateKey;
+    private readonly string _keyPath;
 
     private CancellationTokenSource? _cts;
     private Task? _loop;
@@ -54,12 +54,19 @@ public sealed class SshConnectionService : IDisposable
         _config.Validate();
         _verifier = new HostKeyVerifier(_config.KnownHostKey);
 
-        // Our own credential (empty passphrase). This is NOT the server host key and plays no
-        // part in host-key verification; it is loaded once and reused across reconnects.
-        // Expand environment variables so keyPath values written the design §9.1 / README way
-        // (e.g. "%USERPROFILE%\.ssh\watcher_ed25519") resolve to a real path before SSH.NET
-        // opens the file — otherwise the documented example never loads.
-        _privateKey = new PrivateKeyFile(Environment.ExpandEnvironmentVariables(_config.KeyPath));
+        // Resolve the key path once, expanding environment variables so values written the design
+        // §9.1 / README way (e.g. "%USERPROFILE%\.ssh\watcher_ed25519") become a real path before
+        // SSH.NET opens the file (MEDIUM 2). Fail-fast here if the file is missing, so a mis-configured
+        // server is excluded at startup instead of looping forever in reconnect.
+        //
+        // MEDIUM 3: we do NOT build/hold a long-lived PrivateKeyFile here. The credential is created
+        // per-connection inside the reconnect loop (same scope as its SshClient) so it is never shared
+        // across connections — removing the Dispose/handshake race between a reconnect and an in-flight
+        // auth that a single reused instance could hit. We only stat the path at construction.
+        _keyPath = Environment.ExpandEnvironmentVariables(_config.KeyPath);
+        if (!File.Exists(_keyPath))
+            throw new FileNotFoundException(
+                $"private key not found for server '{_config.Id}'.", _keyPath);
     }
 
     public void Start()
@@ -93,9 +100,15 @@ public sealed class SshConnectionService : IDisposable
             {
                 SetState(ConnectionState.Connecting, $"connecting to {_config.Id}");
 
+                // MEDIUM 3: a fresh PrivateKeyFile per attempt, in the SAME scope as the SshClient.
+                // Both are disposed by their `using` before the next iteration, so the credential is
+                // never shared between connections and can't be disposed from under an in-flight
+                // handshake. Creation cost is paid only on (re)connect, never at 1Hz (§13.2).
+                using var privateKey = new PrivateKeyFile(_keyPath);
+
                 var connInfo = new ConnectionInfo(
                     _config.Host, _config.Port, _config.User,
-                    new PrivateKeyAuthenticationMethod(_config.User, _privateKey))
+                    new PrivateKeyAuthenticationMethod(_config.User, privateKey))
                 {
                     Timeout = ConnectTimeout,
                 };
@@ -223,6 +236,7 @@ public sealed class SshConnectionService : IDisposable
     {
         try { _cts?.Cancel(); } catch { /* ignore */ }
         _cts?.Dispose();
-        _privateKey.Dispose();
+        // MEDIUM 3: no shared PrivateKeyFile to dispose here — each connection owns and disposes its
+        // own credential inside the reconnect loop.
     }
 }

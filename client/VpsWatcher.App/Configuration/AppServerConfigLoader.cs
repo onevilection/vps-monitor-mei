@@ -5,27 +5,33 @@ using VpsWatcher.Core.Configuration;
 namespace VpsWatcher.App.Configuration;
 
 /// <summary>
-/// Loads the (single, Phase 3a) server connection target WITHOUT ever reading repo-committed
-/// secrets. Resolution order, highest first:
+/// Loads the N server connection targets WITHOUT ever reading repo-committed secrets.
+/// Resolution order, highest first:
 /// <list type="number">
-///   <item>CLI args / env vars — the same keys ConsoleTest used in Phase 2
+///   <item>CLI args / env vars — a single server, for back-compat with Phase 2 ConsoleTest
 ///         (<c>--host/--port/--user/--key/--knownhostkey</c> · <c>VPSWATCH_*</c>).</item>
-///   <item><c>%APPDATA%\VpsWatcher\servers.json</c> (gitignored) — first entry.</item>
+///   <item><c>%APPDATA%\VpsWatcher\servers.json</c> (gitignored) — the full array (Phase 4).</item>
 /// </list>
 /// Real host/key/fingerprint live only in those user-local places, never in the repo (CLAUDE.md).
+///
+/// Fail-closed per server, fail-soft overall (§5.4.1/§9.1): an entry without a pinned
+/// <c>knownHostKey</c> is dropped (MITM detection can't hold without a pin) with the reason sent to
+/// Trace — but the other correctly-pinned servers still load, so one mis-configured entry never
+/// takes down the whole gadget. On-screen <paramref name="error"/> text stays a fixed template with
+/// no parser detail, no path and no secret fragments (MEDIUM 1).
 /// </summary>
 public static class AppServerConfigLoader
 {
     /// <summary>
-    /// Returns the connection target, or <c>null</c> with <paramref name="error"/> set when nothing
-    /// is configured / the file is unreadable. Never throws on absence — the UI shows the message.
+    /// Returns the connection targets (possibly empty). When the list is empty, <paramref name="error"/>
+    /// carries a fixed, secret-free message for the empty-state UI. Never throws on absence.
     /// </summary>
-    public static ServerConfig? Load(string[] args, out string? error)
+    public static IReadOnlyList<ServerConfig> Load(string[] args, out string? error)
     {
         error = null;
         var argMap = ParseArgs(args);
 
-        // 1) explicit args / env vars take precedence.
+        // 1) explicit args / env vars take precedence — a single server (back-compat).
         var host = Value(argMap, "host", "VPSWATCH_HOST");
         if (!string.IsNullOrWhiteSpace(host))
         {
@@ -33,10 +39,10 @@ public static class AppServerConfigLoader
             if (!int.TryParse(portText, out var port))
             {
                 error = $"接続設定エラー: port が不正です（'{portText}'）。";
-                return null;
+                return Array.Empty<ServerConfig>();
             }
 
-            return new ServerConfig
+            var cfg = new ServerConfig
             {
                 Id = Value(argMap, "id", "VPSWATCH_ID") ?? "manual-test",
                 Label = Value(argMap, "label", "VPSWATCH_LABEL"),
@@ -46,9 +52,10 @@ public static class AppServerConfigLoader
                 KeyPath = Value(argMap, "key", "VPSWATCH_KEYPATH") ?? "",
                 KnownHostKey = Value(argMap, "knownhostkey", "VPSWATCH_KNOWNHOSTKEY") ?? "",
             };
+            return FilterUsable(new[] { cfg }, out error);
         }
 
-        // 2) %APPDATA%\VpsWatcher\servers.json (user-local, gitignored).
+        // 2) %APPDATA%\VpsWatcher\servers.json (user-local, gitignored) — the full array.
         var path = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
             "VpsWatcher", "servers.json");
@@ -57,11 +64,11 @@ public static class AppServerConfigLoader
     }
 
     /// <summary>
-    /// Loads the first server from a servers.json at <paramref name="path"/>. Internal seam so the
-    /// parse-error branch is unit-testable against a temp file — the public <see cref="Load"/> always
-    /// uses the user-local %APPDATA% path, which tests must never read or overwrite.
+    /// Loads every server from a servers.json at <paramref name="path"/>. Internal seam so the
+    /// array/parse/fail-soft branches are unit-testable against a temp file — the public
+    /// <see cref="Load"/> always uses the user-local %APPDATA% path, which tests must never touch.
     /// </summary>
-    internal static ServerConfig? LoadFromServersJson(string path, out string? error)
+    internal static IReadOnlyList<ServerConfig> LoadFromServersJson(string path, out string? error)
     {
         error = null;
 
@@ -72,7 +79,7 @@ public static class AppServerConfigLoader
             error =
                 "接続先が未設定です。環境変数 VPSWATCH_HOST/PORT/USER/KEYPATH/KNOWNHOSTKEY を設定するか、" +
                 $"{path} に servers.json（servers.example.json 参照）を置いてください。";
-            return null;
+            return Array.Empty<ServerConfig>();
         }
 
         try
@@ -81,24 +88,62 @@ public static class AppServerConfigLoader
             var servers = JsonSerializer.Deserialize<List<ServerConfig>>(json, JsonOptions);
             if (servers is null || servers.Count == 0)
             {
-                error = $"servers.json にサーバ定義がありません: {path}";
-                return null;
+                error = "servers.json にサーバ定義がありません。servers.example.json を参照してください。";
+                return Array.Empty<ServerConfig>();
             }
 
-            // Phase 3a: first server only. N-server support is Phase 3b.
-            return servers[0];
+            return FilterUsable(servers, out error);
         }
         catch (JsonException ex)
         {
             // servers.json holds host/key/fingerprint; JsonException.Message can echo offending
-            // fragments, and the file's full path embeds the OS username. StatusMessage is painted
-            // on the transparent gadget (screenshot/screen-share surface), so keep BOTH the raw
-            // parser message and the path off-screen — show only a fixed message and send the detail
-            // (message + path) to Trace (off-screen, no persistent log). Same discipline as MEDIUM 1.
+            // fragments, and the file's full path embeds the OS username. The error becomes the
+            // on-screen StatusMessage on the transparent gadget (screenshot/screen-share surface),
+            // so keep BOTH the raw parser message and the path off-screen — show only a fixed message
+            // and send the detail (message + path) to Trace (off-screen, no persistent log). MEDIUM 1.
             System.Diagnostics.Trace.TraceError($"failed to parse servers.json at '{path}': {ex}");
             error = "servers.json の解析に失敗しました。詳細はデバッグ出力を参照してください。";
-            return null;
+            return Array.Empty<ServerConfig>();
         }
+    }
+
+    /// <summary>
+    /// Drops entries with an empty <c>knownHostKey</c> (fail-closed per server: no pin ⇒ no MITM
+    /// detection ⇒ not a connection target), keeping the correctly-pinned ones (fail-soft overall).
+    /// The exclusion reason (server id only — never the host/key/path) goes to Trace. When EVERY
+    /// entry is unusable, <paramref name="error"/> gets a fixed, secret-free message for the empty state.
+    /// </summary>
+    private static IReadOnlyList<ServerConfig> FilterUsable(
+        IReadOnlyList<ServerConfig> servers, out string? error)
+    {
+        error = null;
+
+        var usable = new List<ServerConfig>(servers.Count);
+        int excluded = 0;
+        foreach (var s in servers)
+        {
+            if (string.IsNullOrWhiteSpace(s.KnownHostKey))
+            {
+                excluded++;
+                // Id and fingerprints aren't secret, but keep host/key/path out of even Trace — the
+                // id alone is enough to point the user at the offending servers.json entry.
+                System.Diagnostics.Trace.TraceWarning(
+                    $"servers.json: excluding server '{s.Id}' — knownHostKey is empty " +
+                    "(fail-closed; a pinned host key is required for MITM detection, §5.4.1/§9.1).");
+                continue;
+            }
+            usable.Add(s);
+        }
+
+        if (usable.Count == 0)
+        {
+            // Every entry was unusable. Fixed template only — no parser detail, no path, no secret.
+            error = excluded > 0
+                ? "接続可能なサーバがありません（knownHostKey 未設定）。servers.json を確認してください。"
+                : "servers.json にサーバ定義がありません。servers.example.json を参照してください。";
+        }
+
+        return usable;
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
