@@ -1,8 +1,10 @@
 using System.ComponentModel;
+using System.IO;
 using System.Windows;
 using VpsWatcher.App.Configuration;
 using VpsWatcher.App.Services;
 using VpsWatcher.App.ViewModels;
+using VpsWatcher.Core.Logging;
 
 namespace VpsWatcher.App;
 
@@ -18,10 +20,21 @@ public partial class App : Application
     private MainWindow? _window;
     private AppState _state = new();
     private string _statePath = AppStateStore.DefaultPath;
+    private IAppLogger? _logger;
+
+    /// <summary>Where the NDJSON logs live: %APPDATA%\VpsWatcher\log (outside the repo, §3/秘密情報).</summary>
+    private static string LogDirectory => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VpsWatcher", "log");
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Logging first, so everything below (config load, connections) can be recorded (§5/§6).
+        bool debugMode = LaunchOptions.IsDebugMode(e.Args);
+        _logger = AppLogger.CreateFile("VpsWatcher", debugMode, LogDirectory);
+        _logger.Log(LogSeverity.Info, "VpsWatcher started",
+            new Dictionary<string, object?> { ["debug_mode"] = debugMode ? "on" : "off" });
 
         _statePath = AppStateStore.DefaultPath;
         _state = AppStateStore.Load(_statePath);
@@ -29,7 +42,7 @@ public partial class App : Application
         var dispatcher = new WpfUiDispatcher(Dispatcher);
         var configs = AppServerConfigLoader.Load(e.Args, out var configError);
 
-        _mainViewModel = new MainViewModel(configs, configError, dispatcher)
+        _mainViewModel = new MainViewModel(configs, configError, dispatcher, _logger)
         {
             AlwaysOnTop = _state.AlwaysOnTop, // restore (§5.2.1)
         };
@@ -101,6 +114,11 @@ public partial class App : Application
         Persist();
 
         _mainViewModel?.Dispose();
+
+        // Log exit, then dispose the logger last so the line is flushed to the file (§6 Info).
+        _logger?.Log(LogSeverity.Info, "VpsWatcher exiting");
+        _logger?.Dispose();
+
         base.OnExit(e);
     }
 }

@@ -98,10 +98,12 @@ public static class AppServerConfigLoader
         {
             // servers.json holds host/key/fingerprint; JsonException.Message can echo offending
             // fragments, and the file's full path embeds the OS username. The error becomes the
-            // on-screen StatusMessage on the transparent gadget (screenshot/screen-share surface),
-            // so keep BOTH the raw parser message and the path off-screen — show only a fixed message
-            // and send the detail (message + path) to Trace (off-screen, no persistent log). MEDIUM 1.
-            System.Diagnostics.Trace.TraceError($"failed to parse servers.json at '{path}': {ex}");
+            // on-screen StatusMessage on the transparent gadget (screenshot/screen-share surface), and
+            // Trace is forwarded to any listener (DebugView / ETW) — so keep the raw parser message,
+            // {ex}, AND the path out of both: show a fixed message on-screen and send only the
+            // exception TYPE name to Trace (security review HIGH / MEDIUM 1).
+            System.Diagnostics.Trace.TraceError(
+                $"failed to parse servers.json: {ex.GetType().Name}");
             error = "servers.json の解析に失敗しました。詳細はデバッグ出力を参照してください。";
             return Array.Empty<ServerConfig>();
         }

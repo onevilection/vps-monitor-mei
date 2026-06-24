@@ -1,5 +1,6 @@
 using Renci.SshNet;
 using VpsWatcher.Core.Configuration;
+using VpsWatcher.Core.Logging;
 
 namespace VpsWatcher.Core.Ssh;
 
@@ -36,12 +37,22 @@ public sealed class SshConnectionService : IDisposable
     // negligible against the 1 Hz NDJSON stream, so it does not violate the low-load budget (§13.2).
     private static readonly TimeSpan KeepAliveInterval = TimeSpan.FromSeconds(5);
 
+    // How often the (debug-only) received-data heartbeat is summarised, so the 1 Hz stream is logged
+    // as one line every few seconds instead of 60+ lines/min — keeps even debug_mode within the
+    // low-load budget (§13.2 / instruction §6 Debug).
+    private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(10);
+
     private readonly ServerConfig _config;
     private readonly HostKeyVerifier _verifier;
     private readonly string _keyPath;
+    private readonly IAppLogger? _logger;
 
     private CancellationTokenSource? _cts;
     private Task? _loop;
+
+    // Heartbeat accounting (per connection; reset implicitly when a new pump loop starts).
+    private DateTime _lastHeartbeatUtc;
+    private int _samplesSinceHeartbeat;
 
     public string ServerId => _config.Id;
     public ConnectionState State { get; private set; } = ConnectionState.Disconnected;
@@ -52,9 +63,10 @@ public sealed class SshConnectionService : IDisposable
     /// <summary>Raised on every state transition.</summary>
     public event EventHandler<ConnectionStateChangedEventArgs>? StateChanged;
 
-    public SshConnectionService(ServerConfig config)
+    public SshConnectionService(ServerConfig config, IAppLogger? logger = null)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        _logger = logger;
 
         // Fail-closed before anything connects: Validate() throws on a missing knownHostKey,
         // and HostKeyVerifier's ctor refuses an empty pin (§5.4.1/§9.1).
@@ -175,13 +187,24 @@ public sealed class SshConnectionService : IDisposable
                 }
 
                 // Disconnected = couldn't connect / lost the stream. Keep waiting for recovery.
-                SetState(ConnectionState.Disconnected, ex.GetType().Name);
+                // The exception (type name + stack only — never its Message, §4) is threaded to the
+                // logger so a connection drop is debuggable after the fact.
+                SetState(ConnectionState.Disconnected, ex.GetType().Name, ex);
             }
 
             if (ct.IsCancellationRequested)
                 break;
 
-            try { await Task.Delay(Backoff(attempt++), ct).ConfigureAwait(false); }
+            var delay = Backoff(attempt);
+            _logger?.Log(LogSeverity.Warning, "reconnect scheduled", new Dictionary<string, object?>
+            {
+                ["server_id"] = ServerId,
+                ["attempt"] = attempt + 1,
+                ["backoff_sec"] = delay.TotalSeconds,
+            });
+            attempt++;
+
+            try { await Task.Delay(delay, ct).ConfigureAwait(false); }
             catch (OperationCanceledException) { break; }
         }
     }
@@ -256,6 +279,11 @@ public sealed class SshConnectionService : IDisposable
 
                 // Real silence: unwind the parked read by tearing down the connection, then report
                 // the timeout so RunAsync transitions to Disconnected and reconnects (§5.4).
+                _logger?.Log(LogSeverity.Warning, "silence watchdog fired", new Dictionary<string, object?>
+                {
+                    ["server_id"] = ServerId,
+                    ["silence_sec"] = silenceTimeout.TotalSeconds,
+                });
                 abort();
                 throw new TimeoutException(
                     $"no data for {silenceTimeout.TotalSeconds:0}s (wall-clock watchdog).");
@@ -273,11 +301,45 @@ public sealed class SshConnectionService : IDisposable
                 continue;
 
             if (NdjsonParser.TryParse(line, out var sample) && sample is not null)
+            {
                 MetricsReceived?.Invoke(this, new MetricsReceivedEventArgs(sample));
+                RecordHeartbeat();
+            }
             // else: malformed line dropped (§4), keep reading.
         }
 
         ct.ThrowIfCancellationRequested();
+    }
+
+    /// <summary>
+    /// Summarises the received-data heartbeat at most once per <see cref="HeartbeatInterval"/>
+    /// (instruction §6 Debug). The <see cref="IAppLogger.IsEnabled"/> guard means that in the default
+    /// (OFF) mode this is a single comparison per sample with no allocation, so the 1 Hz stream stays
+    /// within the low-load budget (§13.2).
+    /// </summary>
+    private void RecordHeartbeat()
+    {
+        if (_logger is null || !_logger.IsEnabled(LogSeverity.Debug))
+            return;
+
+        _samplesSinceHeartbeat++;
+        var now = DateTime.UtcNow;
+        if (_lastHeartbeatUtc == default)
+        {
+            _lastHeartbeatUtc = now;
+            return;
+        }
+
+        if (now - _lastHeartbeatUtc < HeartbeatInterval)
+            return;
+
+        _logger.Log(LogSeverity.Debug, "heartbeat", new Dictionary<string, object?>
+        {
+            ["server_id"] = ServerId,
+            ["samples"] = _samplesSinceHeartbeat,
+        });
+        _samplesSinceHeartbeat = 0;
+        _lastHeartbeatUtc = now;
     }
 
     /// <summary>Drains a task's eventual fault/cancellation so an abandoned read/timer can't become
@@ -296,14 +358,47 @@ public sealed class SshConnectionService : IDisposable
         return TimeSpan.FromSeconds(Math.Min(seconds, BackoffCap.TotalSeconds));
     }
 
-    private void SetState(ConnectionState next, string? detail)
+    private void SetState(ConnectionState next, string? detail, Exception? error = null)
     {
         if (State == next)
             return;
 
         var old = State;
         State = next;
+        LogTransition(old, next, detail, error);
         StateChanged?.Invoke(this, new ConnectionStateChangedEventArgs(old, next, detail));
+    }
+
+    /// <summary>
+    /// Records the transition (instruction §6). Level by destination: Connected = Info,
+    /// Disconnected = Warning, HostKeyMismatch = Critical (MITM suspicion, §6.1), Connecting = Debug.
+    /// Fields carry only the non-secret <see cref="ServerId"/>, the from/to states and the (already
+    /// secret-free) detail; any exception is reduced to its type name + (debug-only) stack by the
+    /// logger — never its Message (§4).
+    /// </summary>
+    private void LogTransition(ConnectionState from, ConnectionState to, string? detail, Exception? error)
+    {
+        if (_logger is null)
+            return;
+
+        var severity = to switch
+        {
+            ConnectionState.Connected => LogSeverity.Info,
+            ConnectionState.Disconnected => LogSeverity.Warning,
+            ConnectionState.HostKeyMismatch => LogSeverity.Critical,
+            _ => LogSeverity.Debug, // Connecting
+        };
+
+        var properties = new Dictionary<string, object?>
+        {
+            ["server_id"] = ServerId,
+            ["from"] = from.ToString(),
+            ["to"] = to.ToString(),
+        };
+        if (!string.IsNullOrEmpty(detail))
+            properties["detail"] = detail;
+
+        _logger.Log(severity, $"connection {to.ToString().ToLowerInvariant()}", properties, error);
     }
 
     public void Dispose()
