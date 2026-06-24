@@ -59,7 +59,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             try
             {
-                var vm = new ServerViewModel(config.Id, config.Label, dispatcher);
+                var vm = new ServerViewModel(config.Id, config.Label, dispatcher, config.Thresholds, _logger);
 
                 // SshConnectionService validates the config and resolves the key path in its ctor —
                 // surface any per-server failure by skipping just that server (below), never by

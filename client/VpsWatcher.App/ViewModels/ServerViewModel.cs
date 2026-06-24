@@ -1,6 +1,9 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using VpsWatcher.App.Services;
+using VpsWatcher.Core.Alerts;
+using VpsWatcher.Core.Configuration;
+using VpsWatcher.Core.Logging;
 using VpsWatcher.Core.Schema;
 using VpsWatcher.Core.Ssh;
 
@@ -24,12 +27,22 @@ public sealed partial class ServerViewModel : ObservableObject
     private const string Measuring = "測定中";
 
     private readonly IUiDispatcher _dispatcher;
+    private readonly AlertStateMachine _alerts;
 
-    public ServerViewModel(string id, string? label, IUiDispatcher dispatcher)
+    public ServerViewModel(
+        string id, string? label, IUiDispatcher dispatcher,
+        ServerThresholds? thresholds = null, IAppLogger? logger = null)
     {
         Id = id;
         Label = string.IsNullOrWhiteSpace(label) ? id : label!;
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
+
+        // Per-server alert state machine (§5.3/§6). Fed from the (already UI-thread-marshaled) metric
+        // and connection handlers below, so every machine call — and the AlertState update it raises —
+        // happens on the UI thread; no extra synchronisation needed. The next phase (character / voice)
+        // reads AlertState / subscribes to the machine.
+        _alerts = new AlertStateMachine(id, thresholds, logger);
+        _alerts.StateChanged += (_, e) => AlertState = e.NewState;
     }
 
     /// <summary>Stable server id (matches NDJSON <c>id</c> / servers.json). Set once.</summary>
@@ -89,6 +102,14 @@ public sealed partial class ServerViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsHostKeyMismatch))]
     private ConnectionState _connectionState = ConnectionState.Connecting;
 
+    /// <summary>
+    /// Overall alert state from the per-server <see cref="AlertStateMachine"/> (§6 worst-of). Held for
+    /// the next phase (character expression / colour); the connection-derived banner still uses
+    /// <see cref="ConnectionState"/>. Updated on the UI thread by the machine's StateChanged.
+    /// </summary>
+    [ObservableProperty]
+    private AlertLevel _alertState = AlertLevel.Normal;
+
     // ───────────────────────── derived display text ─────────────────────────
 
     public string CpuText => CpuPct is { } v ? $"{v:0.0}%" : Measuring;
@@ -127,7 +148,11 @@ public sealed partial class ServerViewModel : ObservableObject
         => _dispatcher.Post(() => ApplySample(e.Sample));
 
     public void HandleStateChanged(object? sender, ConnectionStateChangedEventArgs e)
-        => _dispatcher.Post(() => ConnectionState = e.NewState);
+        => _dispatcher.Post(() =>
+        {
+            ConnectionState = e.NewState;
+            _alerts.ProcessConnectionState(e.NewState); // worst-of priority (Disconnected/HostKeyMismatch)
+        });
 
     private void ApplySample(Sample s)
     {
@@ -145,6 +170,10 @@ public sealed partial class ServerViewModel : ObservableObject
         UptimeSec = s.UptimeSec;
 
         ReconcileDisks(s.Disk);
+
+        // Drive the alert state machine from the same sample (UI thread). It applies hysteresis /
+        // debounce / worst-of and raises StateChanged → AlertState (§6).
+        _alerts.ProcessSample(s);
     }
 
     /// <summary>
