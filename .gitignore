@@ -31,6 +31,13 @@ known_hosts
 # VOICEPEAKで再生成できる音声を成果物扱いにするなら除外を検討:
 # /assets/voice/*.wav
 
+# ───────── ログ・診断ダンプ（リポジトリに残さない） ─────────
+# 実ログは %APPDATA%\VpsWatcher\log（リポジトリ外）が既定。開発時にルートへ吐く保険＋誤コミット防止。
+# （testdata/sample.ndjson は契約用ゴールデンなので *.ndjson 一括除外はしない。log配下のみ除外。）
+/log/
+/client/**/log/
+*.dmp
+
 # ───────── 作業メモ・一時ファイル（リポジトリに残さない） ─────────
 tmp/
 

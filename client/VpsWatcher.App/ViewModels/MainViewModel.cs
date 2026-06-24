@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using VpsWatcher.App.Services;
 using VpsWatcher.Core.Configuration;
+using VpsWatcher.Core.Logging;
 using VpsWatcher.Core.Ssh;
 
 namespace VpsWatcher.App.ViewModels;
@@ -39,9 +40,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _alwaysOnTop;
 
+    private readonly IAppLogger? _logger;
+
     public MainViewModel(
-        IReadOnlyList<ServerConfig> configs, string? configError, IUiDispatcher dispatcher)
+        IReadOnlyList<ServerConfig> configs, string? configError, IUiDispatcher dispatcher,
+        IAppLogger? logger = null)
     {
+        _logger = logger;
+
         if (configs is null || configs.Count == 0)
         {
             StatusMessage = configError ?? "接続先が未設定です。";
@@ -58,7 +64,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 // SshConnectionService validates the config and resolves the key path in its ctor —
                 // surface any per-server failure by skipping just that server (below), never by
                 // crashing startup or taking the other servers down with it.
-                var service = new SshConnectionService(config);
+                var service = new SshConnectionService(config, _logger);
                 service.MetricsReceived += vm.HandleMetrics;
                 service.StateChanged += vm.HandleStateChanged;
 
@@ -68,15 +74,29 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             }
             catch (Exception ex)
             {
-                // Never surface the raw exception text on screen. SSH.NET's PrivateKeyFile / connect
-                // exceptions can embed the private-key path, and the empty-state message is painted on
-                // the transparent gadget (so it leaks into screenshots / screen-shares). Record only
-                // the (non-secret) server id and send the full detail to Trace, which has no on-screen
-                // surface and writes no persistent log file (MEDIUM 1 / §5.4.1 / secrets).
+                // Never surface the raw exception text on screen OR to Trace. SSH.NET's PrivateKeyFile /
+                // connect exceptions (and FileNotFoundException.FileName) embed the private-key path in
+                // ex.ToString(); the empty-state message is painted on the transparent gadget, and Trace
+                // is forwarded to any listener (DebugView / ETW). So Trace gets only the (non-secret)
+                // server id + exception TYPE name — never {ex} (security review HIGH / MEDIUM 1 / §4).
                 System.Diagnostics.Trace.TraceError(
-                    $"connection init failed for server '{config.Id}': {ex}");
+                    $"connection init failed for server '{config.Id}': {ex.GetType().Name}");
+                // Persistent, secret-safe record (§6 Error): server id + exception TYPE/stack only,
+                // never ex.Message (which can embed the key path) — the logger enforces that (§4).
+                _logger?.Log(LogSeverity.Error, "connection init failed",
+                    new Dictionary<string, object?> { ["server_id"] = config.Id }, ex);
                 failedIds.Add(config.Id);
             }
+        }
+
+        // Non-secret: the count + ids of the servers actually shown (§6 Info).
+        if (Servers.Count > 0)
+        {
+            _logger?.Log(LogSeverity.Info, "servers loaded", new Dictionary<string, object?>
+            {
+                ["count"] = Servers.Count,
+                ["server_ids"] = string.Join(",", Servers.Select(s => s.Id)),
+            });
         }
 
         // Empty state only when nothing could be shown. Partial failures stay in Trace so a single
