@@ -1,0 +1,12 @@
+{
+  "background_opacity": 0.9,
+  "expressions": {
+    "Normal": "mei-hutuu.png",
+    "Caution": "mei-nayami.png",
+    "Warning": "mei-odoroki.png",
+    "Critical": "mei-obie.png",
+    "Disconnected": "mei-konnrann.png",
+    "HostKeyMismatch": "mei-ikari.png",
+    "Recovery": "mei-yorokobi.png"
+  }
+}

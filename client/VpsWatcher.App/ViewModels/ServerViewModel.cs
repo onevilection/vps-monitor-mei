@@ -51,9 +51,10 @@ public sealed partial class ServerViewModel : ObservableObject
     /// <summary>Display label; falls back to <see cref="Id"/>. Set once.</summary>
     public string Label { get; }
 
-    /// <summary>Up-to-4-char identifier for the compact 200px row (Phase 6a §3). First 4 chars of the
-    /// label (which itself falls back to the id). Set once.</summary>
-    public string ShortId => Label.Length <= 4 ? Label : Label[..4];
+    /// <summary>Up-to-8-char identifier for the compact 200px row (Phase 6b §1). First 8 chars of the
+    /// label (which itself falls back to the id) — label-based so servers whose ids share a long
+    /// common prefix stay distinguishable. Set once.</summary>
+    public string ShortId => Label.Length <= 8 ? Label : Label[..8];
 
     // ───────────────────────── metrics (bindable) ─────────────────────────
 

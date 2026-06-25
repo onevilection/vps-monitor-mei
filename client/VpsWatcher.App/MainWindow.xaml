@@ -21,9 +21,9 @@
         <conv:AlertLevelToBrushConverter x:Key="LevelBrush" />
 
         <!-- Decoded once + frozen on load (§13.2): one shared instance per image, reused by every
-             binding so there is no per-frame allocation or redecoding. -->
-        <BitmapImage x:Key="CharNormal" UriSource="pack://application:,,,/VpsWatcher.App;component/Assets/char/mei-hutuu.png"
-                     CacheOption="OnLoad" DecodePixelWidth="140" />
+             binding so there is no per-frame allocation or redecoding. The character portrait is no
+             longer a static resource — it's supplied (cached/frozen) by CharacterImageProvider and
+             swapped by state via MainViewModel.CharacterImage (§8). -->
         <BitmapImage x:Key="IconCpu" UriSource="pack://application:,,,/VpsWatcher.App;component/Assets/icon/cpu.png"
                      CacheOption="OnLoad" DecodePixelWidth="28" />
         <BitmapImage x:Key="IconMem" UriSource="pack://application:,,,/VpsWatcher.App;component/Assets/icon/memory.png"
@@ -42,11 +42,13 @@
             <Setter Property="Margin" Value="0,0,2,0" />
         </Style>
 
-        <!-- One header icon, centred over its number column. -->
+        <!-- One header icon, right-aligned with the same right margin as the numbers below it so the
+             icon sits visually over its (right-aligned) value column (Phase 6b §2). -->
         <Style x:Key="HeaderIcon" TargetType="Image">
             <Setter Property="Width" Value="22" />
             <Setter Property="Height" Value="22" />
-            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="HorizontalAlignment" Value="Right" />
+            <Setter Property="Margin" Value="0,0,2,0" />
             <Setter Property="SnapsToDevicePixels" Value="True" />
         </Style>
 
@@ -104,8 +106,11 @@
         </Style>
     </Window.Resources>
 
-    <!-- Opaque rounded panel = the visible, grabbable, hit-testable gadget body. Fixed 200px wide. -->
-    <Border Width="200" Background="#E61E2228" CornerRadius="12" Padding="10,8"
+    <!-- Opaque rounded panel = the visible, grabbable, hit-testable gadget body. Fixed 200px wide.
+         Background alpha comes from appearance.json background_opacity (§5); fallback brush keeps the
+         original look if the ViewModel hasn't supplied one. -->
+    <Border Width="200" CornerRadius="12" Padding="10,8"
+            Background="{Binding BackgroundBrush, TargetNullValue=#E61E2228, FallbackValue=#E61E2228}"
             BorderBrush="#33FFFFFF" BorderThickness="1">
         <StackPanel>
 
@@ -133,9 +138,9 @@
             <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" Foreground="#FF8A80"
                        FontSize="11" />
 
-            <!-- Character (Phase 6a: fixed Normal portrait; expression swap is 6b). Servers stack up
-                 from her feet — she sits directly above the icon header + rows below. -->
-            <Image Source="{StaticResource CharNormal}" Width="140" HorizontalAlignment="Center"
+            <!-- Character (Phase 6b): portrait swaps with the worst-of state via CharacterImage (§8).
+                 Servers stack up from her feet — she sits directly above the icon header + rows. -->
+            <Image Source="{Binding CharacterImage}" Width="140" HorizontalAlignment="Center"
                    Margin="0,0,0,-4" Stretch="Uniform"
                    Visibility="{Binding HasServer, Converter={StaticResource BoolToVis}}" />
 
@@ -143,14 +148,14 @@
 
                 <!-- Shared icon header (once): each icon is the heading of the number column below it.
                      Columns here MUST match the server-row columns for the icons to sit over the
-                     numbers (id 42 + four 34px metric columns = 178 inner width). -->
+                     numbers (id 54 + four 31px metric columns = 178 inner width). -->
                 <Grid Margin="0,2,0,3">
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="42" />
-                        <ColumnDefinition Width="34" />
-                        <ColumnDefinition Width="34" />
-                        <ColumnDefinition Width="34" />
-                        <ColumnDefinition Width="34" />
+                        <ColumnDefinition Width="54" />
+                        <ColumnDefinition Width="31" />
+                        <ColumnDefinition Width="31" />
+                        <ColumnDefinition Width="31" />
+                        <ColumnDefinition Width="31" />
                     </Grid.ColumnDefinitions>
                     <Image Grid.Column="1" Style="{StaticResource HeaderIcon}" Source="{StaticResource IconCpu}"  ToolTip="CPU" />
                     <Image Grid.Column="2" Style="{StaticResource HeaderIcon}" Source="{StaticResource IconMem}"  ToolTip="メモリ" />
@@ -181,16 +186,16 @@
                                 <!-- Main row: identifier + cpu / mem / disk(/) / swap numbers. -->
                                 <Grid>
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="42" />
-                                        <ColumnDefinition Width="34" />
-                                        <ColumnDefinition Width="34" />
-                                        <ColumnDefinition Width="34" />
-                                        <ColumnDefinition Width="34" />
+                                        <ColumnDefinition Width="54" />
+                                        <ColumnDefinition Width="31" />
+                                        <ColumnDefinition Width="31" />
+                                        <ColumnDefinition Width="31" />
+                                        <ColumnDefinition Width="31" />
                                     </Grid.ColumnDefinitions>
 
-                                    <!-- Identifier (4 chars). Colour reflects connection state; a
-                                         host-key mismatch adds a purple ⚠ (full warning text is in the
-                                         row tooltip to stay compact). -->
+                                    <!-- Identifier (≤8 chars, label-based). Colour reflects connection
+                                         state; a host-key mismatch adds a purple ⚠ (full warning text
+                                         is in the row tooltip to stay compact). -->
                                     <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center">
                                         <TextBlock Text="⚠" FontSize="11" Foreground="#B06BFF" Margin="0,0,1,0"
                                                    VerticalAlignment="Center"
@@ -246,11 +251,11 @@
                                                     </Style>
                                                 </Grid.Style>
                                                 <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="42" />
-                                                    <ColumnDefinition Width="34" />
-                                                    <ColumnDefinition Width="34" />
-                                                    <ColumnDefinition Width="34" />
-                                                    <ColumnDefinition Width="34" />
+                                                    <ColumnDefinition Width="54" />
+                                                    <ColumnDefinition Width="31" />
+                                                    <ColumnDefinition Width="31" />
+                                                    <ColumnDefinition Width="31" />
+                                                    <ColumnDefinition Width="31" />
                                                 </Grid.ColumnDefinitions>
                                                 <TextBlock Grid.Column="0" Text="{Binding Mount}" ToolTip="{Binding UsedText}"
                                                            FontFamily="Consolas" FontSize="10" Foreground="#9AA1AA"

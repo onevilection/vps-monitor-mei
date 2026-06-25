@@ -1,6 +1,10 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using VpsWatcher.App.Configuration;
 using VpsWatcher.App.Services;
+using VpsWatcher.Core.Alerts;
 using VpsWatcher.Core.Configuration;
 using VpsWatcher.Core.Logging;
 using VpsWatcher.Core.Ssh;
@@ -40,13 +44,45 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private bool _alwaysOnTop;
 
+    // ───────────────────────── character / appearance (§8) ─────────────────────────
+
+    /// <summary>How long the transient recovery (yorokobi) portrait stays before reverting to Normal.</summary>
+    private static readonly TimeSpan RecoveryDuration = TimeSpan.FromSeconds(4);
+
+    private readonly ICharacterImageSource? _images;
+    private readonly IRecoveryScheduler? _recovery;
+
+    /// <summary>Worst-of overall state across all servers — the single "mood" of the one character
+    /// (§8: one Mei expresses the worst server). Recomputed when any server's AlertState changes.</summary>
+    [ObservableProperty]
+    private AlertLevel _worstState = AlertLevel.Normal;
+
+    /// <summary>Current character mood (drives the portrait). Includes the transient Recovery shown
+    /// right after recovering to Normal (§8).</summary>
+    [ObservableProperty]
+    private CharacterMood _currentMood = CharacterMood.Normal;
+
+    /// <summary>The (cached, frozen) portrait for <see cref="CurrentMood"/> — bound by the View's Image.</summary>
+    [ObservableProperty]
+    private ImageSource? _characterImage;
+
+    /// <summary>Panel background brush; its alpha comes from appearance.json's background_opacity (§5).</summary>
+    [ObservableProperty]
+    private Brush? _backgroundBrush;
+
     private readonly IAppLogger? _logger;
 
     public MainViewModel(
         IReadOnlyList<ServerConfig> configs, string? configError, IUiDispatcher dispatcher,
-        IAppLogger? logger = null)
+        IAppLogger? logger = null,
+        AppearanceConfig? appearance = null,
+        ICharacterImageSource? images = null,
+        IRecoveryScheduler? recovery = null)
     {
         _logger = logger;
+        _images = images;
+        _recovery = recovery;
+        ApplyInitialAppearance(appearance ?? new AppearanceConfig());
 
         if (configs is null || configs.Count == 0)
         {
@@ -70,6 +106,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
                 _connections.Add((service, vm));
                 Servers.Add(vm);
+                // Drive the one shared character mood off each server's overall state (§8 worst-of).
+                vm.PropertyChanged += OnServerPropertyChanged;
                 service.Start();
             }
             catch (Exception ex)
@@ -107,7 +145,93 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 ? $"接続の初期化に失敗しました（{string.Join(", ", failedIds)}）。詳細はデバッグ出力を参照してください。"
                 : (configError ?? "接続先が未設定です。");
         }
+
+        RecomputeWorstState(); // seed the initial mood from the (Connecting) servers
     }
+
+    /// <summary>
+    /// Test-only seam: builds the character/appearance wiring over a set of already-constructed
+    /// <see cref="ServerViewModel"/>s WITHOUT any SSH connection, so the worst-of mood / recovery
+    /// logic (§8) can be driven deterministically and network-free.
+    /// </summary>
+    internal MainViewModel(
+        IReadOnlyList<ServerViewModel> servers,
+        AppearanceConfig? appearance = null,
+        ICharacterImageSource? images = null,
+        IRecoveryScheduler? recovery = null,
+        IAppLogger? logger = null)
+    {
+        _logger = logger;
+        _images = images;
+        _recovery = recovery;
+        ApplyInitialAppearance(appearance ?? new AppearanceConfig());
+
+        foreach (var vm in servers)
+        {
+            Servers.Add(vm);
+            vm.PropertyChanged += OnServerPropertyChanged;
+        }
+        RecomputeWorstState();
+    }
+
+    // ───────────────────────── worst-of mood / recovery (§8) ─────────────────────────
+
+    /// <summary>Background opacity → brush (§5) + the initial Normal portrait. Shared by both ctors.</summary>
+    private void ApplyInitialAppearance(AppearanceConfig appearance)
+    {
+        // RGB fixed (1E2228); alpha from the clamped/defaulted opacity.
+        var brush = new SolidColorBrush(Color.FromArgb(appearance.EffectiveAlphaByte(), 0x1E, 0x22, 0x28));
+        brush.Freeze();
+        BackgroundBrush = brush;
+
+        // Initial portrait (Normal). Subsequent changes flow through OnCurrentMoodChanged.
+        CharacterImage = _images?.ImageFor(CharacterMood.Normal);
+    }
+
+    private void OnServerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        // Only the overall AlertState feeds the character — ignore the per-metric churn (§13.2).
+        if (e.PropertyName == nameof(ServerViewModel.AlertState))
+            RecomputeWorstState();
+    }
+
+    /// <summary>Worst-of across all servers (AlertLevel int order = priority, so plain Max). Assigning
+    /// an unchanged value is a no-op, so the mood transition only runs on a real change.</summary>
+    private void RecomputeWorstState()
+    {
+        var worst = AlertLevel.Normal;
+        foreach (var s in Servers)
+            if ((int)s.AlertState > (int)worst)
+                worst = s.AlertState;
+        WorstState = worst;
+    }
+
+    partial void OnWorstStateChanged(AlertLevel oldValue, AlertLevel newValue)
+    {
+        if (newValue == AlertLevel.Normal && oldValue != AlertLevel.Normal)
+        {
+            // Recovered to all-clear: show the transient yorokobi, then revert to Normal after a beat.
+            CurrentMood = CharacterMood.Recovery;
+            if (_recovery is not null)
+                _recovery.Schedule(RecoveryDuration, () =>
+                {
+                    // Guard against a re-escalation that landed during the delay.
+                    if (WorstState == AlertLevel.Normal)
+                        CurrentMood = CharacterMood.Normal;
+                });
+            else
+                CurrentMood = CharacterMood.Normal; // no scheduler (tests) ⇒ skip the transient hold
+        }
+        else
+        {
+            // Any other transition cancels a pending recovery-revert and shows the new mood at once.
+            _recovery?.Cancel();
+            CurrentMood = AppearanceConfig.MoodFor(newValue);
+        }
+    }
+
+    partial void OnCurrentMoodChanged(CharacterMood value)
+        => CharacterImage = _images?.ImageFor(value);
 
     /// <summary>How long shutdown waits for the reconnect loops to wind down before giving up.</summary>
     private static readonly TimeSpan ShutdownGrace = TimeSpan.FromSeconds(3);
@@ -119,7 +243,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             service.MetricsReceived -= vm.HandleMetrics;
             service.StateChanged -= vm.HandleStateChanged;
+            vm.PropertyChanged -= OnServerPropertyChanged;
         }
+        _recovery?.Cancel();
 
         // Bundle the cancellation: StopAsync cancels each loop's token, then we await them together
         // (bounded) so no SSH read loop / connection is left running past window close — instead of

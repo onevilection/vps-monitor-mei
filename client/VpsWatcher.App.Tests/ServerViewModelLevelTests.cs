@@ -104,10 +104,12 @@ public sealed class ServerViewModelLevelTests
     }
 
     [Theory]
-    [InlineData("Example Server 1", "Exam")]
-    [InlineData("vps-1", "vps-")]
-    [InlineData("AB", "AB")]
-    public void ShortId_is_first_four_chars(string label, string expected)
+    // Phase 6b §1: label-based, first 8 chars — ids sharing a long prefix stay distinguishable.
+    [InlineData("rasi-claude", "rasi-cla")]
+    [InlineData("rasi-bri-dev", "rasi-bri")]
+    [InlineData("Example1", "Example1")] // exactly 8 ⇒ unchanged
+    [InlineData("AB", "AB")]             // shorter than 8 ⇒ unchanged
+    public void ShortId_is_first_eight_chars_of_label(string label, string expected)
     {
         var vm = new ServerViewModel("id-x", label, new SynchronousDispatcher());
         Assert.Equal(expected, vm.ShortId);
@@ -116,7 +118,7 @@ public sealed class ServerViewModelLevelTests
     [Fact]
     public void ShortId_falls_back_to_id_when_label_blank()
     {
-        var vm = new ServerViewModel("vps-9", null, new SynchronousDispatcher());
-        Assert.Equal("vps-", vm.ShortId);
+        var vm = new ServerViewModel("vps-12345", null, new SynchronousDispatcher());
+        Assert.Equal("vps-1234", vm.ShortId); // first 8 chars of the id
     }
 }
