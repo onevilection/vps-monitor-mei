@@ -39,9 +39,12 @@ public sealed partial class ServerViewModel : ObservableObject
 
         // Per-server alert state machine (§5.3/§6). Fed from the (already UI-thread-marshaled) metric
         // and connection handlers below, so every machine call — and the AlertState update it raises —
-        // happens on the UI thread; no extra synchronisation needed. The next phase (character / voice)
-        // reads AlertState / subscribes to the machine.
-        _alerts = new AlertStateMachine(id, thresholds, logger);
+        // happens on the UI thread; no extra synchronisation needed.
+        //
+        // Resolve thresholds with §6.2 defaults FIRST: a servers.json without (or with a partial /
+        // invalid) thresholds block must still alert — unset/bad metrics fall back to defaults rather
+        // than being left unjudged (the "always Normal" bug). The machine's own contract is unchanged.
+        _alerts = new AlertStateMachine(id, DefaultThresholds.Resolve(thresholds, id, logger), logger);
         _alerts.StateChanged += (_, e) => AlertState = e.NewState;
     }
 

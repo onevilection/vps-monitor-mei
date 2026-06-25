@@ -39,6 +39,19 @@ public sealed class ServerViewModelLevelTests
         vm.HandleMetrics(null, new MetricsReceivedEventArgs(s));
 
     [Fact]
+    public void No_thresholds_in_config_still_alerts_via_defaults()
+    {
+        // Phase 6b-fix §1: a ServerViewModel built WITHOUT thresholds must still escalate — the
+        // §6.2 defaults are applied (previously it stayed Normal no matter how high the values went).
+        var vm = new ServerViewModel("vps-1", "A", new SynchronousDispatcher()); // no thresholds
+        for (int i = 0; i < 3; i++)
+            Feed(vm, Sample(cpu: 96, mem: 1, swap: 0, ("/", 1))); // > cpu default critical 95
+
+        Assert.Equal(AlertLevel.Critical, vm.CpuLevel);
+        Assert.Equal(AlertLevel.Critical, vm.AlertState);
+    }
+
+    [Fact]
     public void Per_metric_levels_start_normal()
     {
         var vm = NewVm();

@@ -205,7 +205,10 @@
                                                    ToolTip="{Binding Label}">
                                             <TextBlock.Style>
                                                 <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground" Value="#F5F7FA" />
+                                                    <!-- Base colour follows the panel opacity (light, or dark when
+                                                         faint) via the window's PrimaryTextBrush (§3). -->
+                                                    <Setter Property="Foreground"
+                                                            Value="{Binding DataContext.PrimaryTextBrush, RelativeSource={RelativeSource AncestorType=Window}}" />
                                                     <Style.Triggers>
                                                         <DataTrigger Binding="{Binding IsDisconnected}" Value="True">
                                                             <Setter Property="Foreground" Value="#9AA1AA" />

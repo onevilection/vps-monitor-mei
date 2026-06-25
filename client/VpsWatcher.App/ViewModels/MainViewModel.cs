@@ -70,6 +70,12 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private Brush? _backgroundBrush;
 
+    /// <summary>Brush for the panel's normal text (e.g. the server identifier): light on a solid
+    /// background, dark when the background is faint (background_opacity &lt; 0.3) so it stays
+    /// readable (Phase 6b-fix §3). Metric numbers keep their own level colour.</summary>
+    [ObservableProperty]
+    private Brush? _primaryTextBrush;
+
     private readonly IAppLogger? _logger;
 
     public MainViewModel(
@@ -183,6 +189,13 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var brush = new SolidColorBrush(Color.FromArgb(appearance.EffectiveAlphaByte(), 0x1E, 0x22, 0x28));
         brush.Freeze();
         BackgroundBrush = brush;
+
+        // Dark text on a faint panel, light text otherwise (§3).
+        var textBrush = new SolidColorBrush(appearance.UseDarkText()
+            ? Color.FromRgb(0x1A, 0x1D, 0x21)   // near-black, readable over a see-through panel
+            : Color.FromRgb(0xF5, 0xF7, 0xFA));  // the existing light text colour
+        textBrush.Freeze();
+        PrimaryTextBrush = textBrush;
 
         // Initial portrait (Normal). Subsequent changes flow through OnCurrentMoodChanged.
         CharacterImage = _images?.ImageFor(CharacterMood.Normal);

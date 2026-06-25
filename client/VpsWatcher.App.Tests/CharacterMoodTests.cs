@@ -57,6 +57,19 @@ public sealed class CharacterMoodTests
     private static void SetState(ServerViewModel vm, ConnectionState state) =>
         vm.HandleStateChanged(null, new ConnectionStateChangedEventArgs(ConnectionState.Connecting, state, null));
 
+    [Theory]
+    [InlineData(0.2, 0x1A, 0x1D, 0x21)]   // faint panel ⇒ dark text (§3)
+    [InlineData(0.9, 0xF5, 0xF7, 0xFA)]   // solid panel ⇒ light text
+    public void PrimaryTextBrush_follows_background_opacity(double opacity, byte r, byte g, byte b)
+    {
+        var vm = new MainViewModel(
+            Array.Empty<ServerViewModel>(),
+            appearance: new AppearanceConfig { BackgroundOpacity = opacity });
+
+        var brush = Assert.IsType<SolidColorBrush>(vm.PrimaryTextBrush);
+        Assert.Equal(Color.FromRgb(r, g, b), brush.Color);
+    }
+
     [Fact]
     public void Starts_normal()
     {
