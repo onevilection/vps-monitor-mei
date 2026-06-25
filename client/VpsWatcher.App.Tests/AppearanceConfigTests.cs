@@ -49,6 +49,24 @@ public sealed class AppearanceConfigTests
         Assert.Equal(expected, cfg.EffectiveAlphaByte());
     }
 
+    // ───────────────────────── low-opacity dark text (§3) ─────────────────────────
+
+    [Theory]
+    [InlineData(0.0, true)]
+    [InlineData(0.29, true)]
+    [InlineData(0.3, false)]   // boundary: 0.3 exactly ⇒ still light text
+    [InlineData(0.31, false)]
+    [InlineData(0.9, false)]
+    public void UseDarkText_only_below_the_threshold(double opacity, bool expectDark)
+    {
+        var cfg = new AppearanceConfig { BackgroundOpacity = opacity };
+        Assert.Equal(expectDark, cfg.UseDarkText());
+    }
+
+    [Fact]
+    public void UseDarkText_uses_the_default_opacity_when_unset()
+        => Assert.False(new AppearanceConfig().UseDarkText()); // default 0.9 ⇒ light
+
     // ───────────────────────── expression map (§4) ─────────────────────────
 
     [Theory]

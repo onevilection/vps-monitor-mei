@@ -50,6 +50,14 @@ public sealed class AppearanceConfig
     /// <summary>Default panel opacity (matches the 6a hard-coded <c>#E6…</c> = 230/255 ≈ 0.9).</summary>
     public const double DefaultOpacity = 0.9;
 
+    /// <summary>Below this background opacity the panel is too see-through for white text, so the
+    /// normal text (e.g. the server identifier) switches to a dark colour (Phase 6b-fix §3). At or
+    /// above it, text stays light. Metric numbers keep their level colour regardless.</summary>
+    public const double DarkTextOpacityThreshold = 0.3;
+
+    /// <summary>True when the (effective) background is faint enough to need dark text.</summary>
+    public bool UseDarkText() => EffectiveOpacity() < DarkTextOpacityThreshold;
+
     /// <summary>Bundled default expression PNGs per mood (§8). The file names match the repo's
     /// <c>assets/char/</c> assets compiled into the app's resources.</summary>
     public static readonly IReadOnlyDictionary<CharacterMood, string> DefaultExpressions =
