@@ -33,6 +33,12 @@
     <Resource Include="..\..\assets\icon\disc.png" Link="Assets\icon\disc.png" />
     <Resource Include="..\..\assets\icon\swap.png" Link="Assets\icon\swap.png" />
     <Resource Include="..\..\assets\char\mei-hutuu.png" Link="Assets\char\mei-hutuu.png" />
+    <Resource Include="..\..\assets\char\mei-nayami.png" Link="Assets\char\mei-nayami.png" />
+    <Resource Include="..\..\assets\char\mei-odoroki.png" Link="Assets\char\mei-odoroki.png" />
+    <Resource Include="..\..\assets\char\mei-obie.png" Link="Assets\char\mei-obie.png" />
+    <Resource Include="..\..\assets\char\mei-konnrann.png" Link="Assets\char\mei-konnrann.png" />
+    <Resource Include="..\..\assets\char\mei-ikari.png" Link="Assets\char\mei-ikari.png" />
+    <Resource Include="..\..\assets\char\mei-yorokobi.png" Link="Assets\char\mei-yorokobi.png" />
   </ItemGroup>
 
 </Project>

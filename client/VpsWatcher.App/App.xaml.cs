@@ -42,7 +42,16 @@ public partial class App : Application
         var dispatcher = new WpfUiDispatcher(Dispatcher);
         var configs = AppServerConfigLoader.Load(e.Args, out var configError);
 
-        _mainViewModel = new MainViewModel(configs, configError, dispatcher, _logger)
+        // Appearance (§8): user-editable expression map + background opacity. Fail-soft to bundled
+        // defaults. Portraits are decoded + frozen up front so state changes only swap the cached
+        // ImageSource (§13.2). The recovery (yorokobi) revert runs on a one-shot UI-thread timer.
+        var appearance = AppearanceStore.Load(AppearanceStore.DefaultPath, _logger);
+        var images = new CharacterImageProvider(appearance, logger: _logger);
+        images.PreloadAll();
+        var recovery = new DispatcherRecoveryScheduler(Dispatcher);
+
+        _mainViewModel = new MainViewModel(
+            configs, configError, dispatcher, _logger, appearance, images, recovery)
         {
             AlwaysOnTop = _state.AlwaysOnTop, // restore (§5.2.1)
         };
