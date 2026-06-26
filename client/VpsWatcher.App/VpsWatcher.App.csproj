@@ -8,7 +8,9 @@
     <Nullable>enable</Nullable>
     <RootNamespace>VpsWatcher.App</RootNamespace>
     <AssemblyName>VpsWatcher.App</AssemblyName>
-    <!-- Phase 3a: normal window. Transparency/Topmost/DragMove come in Phase 3b. -->
+    <!-- Release version. Keep in sync with the SemVer tag (vX.Y.Z) the Release is cut from. -->
+    <Version>0.1.0</Version>
+    <Product>VPS監視-Mei</Product>
   </PropertyGroup>
 
   <ItemGroup>

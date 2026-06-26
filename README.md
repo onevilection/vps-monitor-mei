@@ -21,9 +21,24 @@ N台の Ubuntu VPS の CPU / メモリ / ストレージ / ネットワークを
 
 ---
 
-## 導入（概要・追って充実）
+## 全体像
 
-> ⚠️ 本セクションは骨子。実バイナリ公開（GitHub Releases）後に手順を確定する。
+```
+  ┌────────────── Ubuntu VPS（N台） ──────────────┐        ┌─────── Windows ───────┐
+  │  agent（Go 静的バイナリ）                       │        │  VpsWatcher.App.exe    │
+  │   /proc・statfs を直接 read → NDJSON 1行/秒     │  SSH   │   （self-contained WPF）│
+  │   listen しない・常駐しない                       │ ◀────  │   各VPSへSSH接続し表示  │
+  │   SSH接続中だけ起動し stdout へ流す               │  exec  │   数値・バー・キャラ・音声│
+  └───────────────────────────────────────────────┘        └────────────────────────┘
+```
+
+- **VPS 側**で `agent` を設置（SSH の forced-command に束縛）→ **Windows 側**でクライアントを起動し、各 VPS へ SSH 接続して NDJSON を受け取り表示する。
+- 公開ポートは増えない。到達経路は既存の SSH（鍵認証）のみ。
+- 導入は **(A) VPS 側エージェント設置** → **(B) Windows クライアント導入** の順。両方とも GitHub Releases（タグ `vX.Y.Z`）から取得し、SHA256 で完全性を検証してから使う。
+
+---
+
+## 導入
 
 ### サーバ側エージェント（Go）
 
@@ -48,6 +63,8 @@ sudo install -m 755 agent-linux-amd64 /opt/vpswatcher/agent
 ```
 
 arm64（aarch64）の場合は、上記の `agent-linux-amd64` を `agent-linux-arm64` に読み替えて同じ手順を実行する。
+
+> 💡 上の URL の `releases/latest/download/` は**常に最新リリース**を指す。特定バージョンに固定したいときは `latest` をタグに置き換える（例: `releases/download/v0.1.0/agent-linux-amd64`）。`.sha256` も同じパスで取得する。最初の公開版は **v0.1.0**。
 
 #### 起動モデル（重要）
 
@@ -117,15 +134,57 @@ ssh -i "$env:USERPROFILE\.ssh\watcher_ed25519" -p <port> metrics@<host>
 - 初回接続時は**ホスト鍵の確認**を求められる。表示されたフィンガープリントが正しいことを確認してから受け入れる（このホスト鍵はクライアントが後でピン留め検証に使う。設計書 §4）。
 - 成功すると NDJSON が 1 行/秒で流れ出す。**1 行目はレート系（`cpu_pct`/`rx_bps`/`tx_bps`）が `null`（測定中）**、2 行目以降が実値になる。`Ctrl+C` で停止する。
 
-#### クライアントアプリ（WPF）の導入
+#### クライアントアプリ（WPF）の入手と実行
 
-> （WPF クライアント実装後に提供予定。以下は予定手順）
+GitHub Releases の **v0.1.0** から self-contained 単一 exe をダウンロードして実行する。
 
-GitHub Releases から self-contained 単一 exe をダウンロードして実行する。
+1. **ダウンロード**: [Releases](https://github.com/onevilection/vps-monitor-mei/releases) の v0.1.0 から `VpsWatcher.App.exe` と `VpsWatcher.App.exe.sha256` の**両方**を取得する。
+
+2. **SHA256 で完全性を検証**（agent 側の `sha256sum -c` と同じ思想）。PowerShell で 2 つの値が一致することを確認する:
+
+   ```powershell
+   # exe の実ハッシュ
+   (Get-FileHash VpsWatcher.App.exe -Algorithm SHA256).Hash.ToLower()
+   # 期待値（.sha256 の中身。先頭のハッシュ値部分）
+   Get-Content VpsWatcher.App.exe.sha256
+   ```
+
+   表示された 2 つのハッシュ値が一致すれば改ざんされていない。一致しない場合は使わず、ダウンロードし直す。
+
+3. **実行**: self-contained（.NET ランタイム同梱）なので、**.NET のインストールは不要**。`VpsWatcher.App.exe` をそのままダブルクリックで起動できる。
 
 - ⚠️ **SmartScreen 警告**: 署名なし exe のため初回起動時に保護警告が出る。自分用／少人数なら「詳細情報 → 実行」で続行可。
-- ⚠️ **サイズ**: .NET ランタイム同梱のため 100MB 超になる（ゼロインストールとのトレードオフ）。
-- 監視対象は `%APPDATA%\VpsWatcher\servers.json` に定義する（テンプレートは [`servers.example.json`](servers.example.json)）。`host`/`port`/`user`(=`metrics`)/`keyPath`(=`watcher_ed25519`)/`knownHostKey`(ピン留めするホスト鍵)/`iface`/`mounts`/`thresholds` を設定する。詳細は下の「設定」節と設計書 §9.1。
+- ⚠️ **サイズ**: .NET ランタイム同梱のため ~170MB になる（ゼロインストールとのトレードオフ）。
+
+#### 初回設定（servers.json）
+
+監視対象 VPS は `%APPDATA%\VpsWatcher\servers.json` に**配列**で定義する（テンプレートは [`servers.example.json`](servers.example.json)）。各要素のフィールド:
+
+| フィールド | 内容 |
+|---|---|
+| `id` | サーバ識別子（agent の forced-command の `--id` と一致させる） |
+| `label` | 表示名（任意） |
+| `host` / `port` | VPS のホスト名/IP と SSH ポート |
+| `user` | 監視専用ユーザ（= `metrics`） |
+| `keyPath` | 監視用秘密鍵のパス（= `%USERPROFILE%\.ssh\watcher_ed25519`） |
+| `knownHostKey` | **ピン留めするホスト鍵**（MITM 防止。接続確認時に表示された鍵を設定） |
+| `iface` / `mounts` | 監視する NIC / マウント（任意。省略時は自動判定） |
+| `thresholds` | しきい値（**任意**。未設定ならデフォルト適用。下の「設定」節を参照） |
+
+詳細は下の「設定」節と設計書 §9.1。
+
+#### 任意設定（appearance.json）
+
+外観・音声は `%APPDATA%\VpsWatcher\appearance.json` でカスタマイズできる（テンプレートは [`appearance.example.json`](appearance.example.json)）。表情マップ・アラート音声マップ・背景不透明度（`background_opacity`）・音量（`master_volume`）・クリック時の音を設定する。**未設定なら exe 同梱のデフォルト**が使われるので、最初は置かなくてよい。
+
+#### 起動・操作
+
+起動すると、デスクトップに透過ガジェットが常駐する。
+
+- **移動**: パネルを**ドラッグ**して好きな位置へ。
+- **最前面ピン留め**: 最前面固定の ON/OFF を切り替えられる（状態は記憶される）。
+- **終了**: `×` で終了。
+- **ステータス読み上げ**: **キャラクターをクリック**すると、現在の最悪状態を音声で読み上げる。
 
 ---
 
@@ -158,7 +217,8 @@ dotnet publish client/VpsWatcher.App -p:PublishProfile=win-x64
 
 - 発行プロファイル: [`client/VpsWatcher.App/Properties/PublishProfiles/win-x64.pubxml`](client/VpsWatcher.App/Properties/PublishProfiles/win-x64.pubxml)（`SelfContained` / `PublishSingleFile` / trimming なし / ネイティブDLL自己展開）。
 - 出力: `client/VpsWatcher.App/bin/Release/net8.0-windows/win-x64/publish/VpsWatcher.App.exe`（.NET ランタイム同梱のため **~170MB**。これは正常）。アイコン・キャラ・音声は exe 内リソースに同梱され、ユーザー側 `%APPDATA%\VpsWatcher\assets\…` に同名ファイルを置けば差し替え可。
-- 配布: この exe を GitHub Releases（タグ `vX.Y.Z` 連動）に添付して配る予定。利用者は Release から取得して実行（SmartScreen 警告は「詳細情報 → 実行」で続行）。発行物バイナリはリポジトリにコミットしない。
+- 配布: この exe を GitHub Releases（タグ `vX.Y.Z` 連動）に添付して配る。利用者は Release から取得して実行（SmartScreen 警告は「詳細情報 → 実行」で続行）。発行物バイナリはリポジトリにコミットしない。
+- タグ打ち・SHA256 生成・Release への手動添付の具体手順は [`docs/release.md`](docs/release.md)（リリース手順）を参照。
 
 ---
 
